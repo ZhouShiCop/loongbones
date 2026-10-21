@@ -1,0 +1,26 @@
+# Loongbones 文本格式约定（规范 `项目规范.md` §8.2）
+#
+# 约定取自仓库现有源码的实际形态：UTF-8 无 BOM、LF、2 空格缩进。
+# 既有文件在下一次被修改时逐步对齐；**不为满足本文件而批量重格式化无关文件**
+# （规范 §8.1）。
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Markdown 的行尾双空格是换行语义，不自动裁剪
+[*.md]
+trim_trailing_whitespace = false
+
+# 生成物：可从源码重建，不手工编辑
+[build*/**]
+generated_code = true
+
+[*.{log,err}]
+generated_code = true

@@ -1,0 +1,233 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://loongbones.local/schema/native-project-v1.schema.json",
+  "title": "Loongbones Native Project v1",
+  "description": "Loongbones 原生项目格式 Schema v1。规范口径见 docs/format/native-project-v1-rfc.md。JSON Schema 无法表达跨对象引用闭合与全局 ID 唯一性，这些由探针与 codec 执行时检查。",
+
+  "definitions": {
+    "ulid": {
+      "type": "string",
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+      "description": "26 字符 Crockford Base32 ULID（排除 I/L/O/U；首字符仅承载 3 bit，故取值 0-7）。"
+    },
+
+    "transform": {
+      "type": "object",
+      "description": "二维局部变换。Y-up 坐标系；旋转单位为度；组合顺序 world = parent × local（ADR-0003 C1/C2/C9）。",
+      "properties": {
+        "x": { "type": "number", "description": "沿 X 轴平移，单位：工程空间单位。", "default": 0.0 },
+        "y": { "type": "number", "description": "沿 Y 轴平移（Y-up），单位：工程空间单位。", "default": 0.0 },
+        "rotationDeg": { "type": "number", "description": "绕自身原点旋转，单位：度（°）。", "default": 0.0 },
+        "scaleX": { "type": "number", "description": "X 方向缩放倍率。", "default": 1.0 },
+        "scaleY": { "type": "number", "description": "Y 方向缩放倍率。", "default": 1.0 }
+      },
+      "additionalProperties": true,
+      "description_note": "所有 number 必须是有限数，NaN / Infinity 字面量一律拒绝（RFC 8259 无此文法）。"
+    },
+
+    "node": {
+      "type": "object",
+      "description": "节点记录。NodeCommon 已扁平化，不额外嵌套 common 层。",
+      "required": ["id", "name", "type", "parent", "children", "transform"],
+      "properties": {
+        "id": { "$ref": "#/definitions/ulid", "description": "NodeId。" },
+        "name": { "type": "string" },
+        "parent": {
+          "description": "父节点 NodeId；场景根必须为 null。",
+          "oneOf": [{ "$ref": "#/definitions/ulid" }, { "type": "null" }]
+        },
+        "children": {
+          "type": "array",
+          "description": "子节点 NodeId 有序列表；顺序即绘制/遍历顺序，不得重复。",
+          "items": { "$ref": "#/definitions/ulid" },
+          "default": []
+        },
+        "transform": { "$ref": "#/definitions/transform" },
+        "visible": { "type": "boolean", "default": true },
+        "locked": { "type": "boolean", "default": false },
+        "type": {
+          "type": "string",
+          "description": "节点种类。kRoot/kGroup/kImage 的稳定字符串表示。",
+          "enum": ["root", "group", "image"]
+        },
+        "assetId": {
+          "description": "ImageAssetId；仅 type=image 可持，且与 regionId 互斥。",
+          "oneOf": [{ "$ref": "#/definitions/ulid" }, { "type": "null" }],
+          "default": null
+        },
+        "regionId": {
+          "description": "AtlasRegionId；仅 type=image 可持，且与 assetId 互斥。",
+          "oneOf": [{ "$ref": "#/definitions/ulid" }, { "type": "null" }],
+          "default": null
+        }
+      },
+      "additionalProperties": true,
+      "note": "type=image 时 assetId 与 regionId 必须恰好其一非空（XOR）；其余类型两者都必须为空。该互斥约束由探针/codec 检查。"
+    },
+
+    "imageAsset": {
+      "type": "object",
+      "description": "图片资源元数据。只存元数据 + 存储模式 + 位置标识，不解析路径、不读文件（Task 1 §3.5）。",
+      "required": ["id", "name", "storage", "location"],
+      "properties": {
+        "id": { "$ref": "#/definitions/ulid" },
+        "name": { "type": "string", "description": "展示名，在本工程内唯一。" },
+        "type": { "type": "string", "enum": ["static"], "default": "static" },
+        "storage": { "type": "string", "enum": ["external", "inProject"] },
+        "location": { "type": "string", "description": "不透明位置标识；不解析、不校验存在性（RFC §3）。" },
+        "pixelWidth": { "type": ["integer", "null"], "default": null },
+        "pixelHeight": { "type": ["integer", "null"], "default": null }
+      },
+      "additionalProperties": true
+    },
+
+    "textureAsset": {
+      "type": "object",
+      "description": "纹理资产：一张图片文件（图集页的像素来源）。",
+      "required": ["id", "name", "storage", "location"],
+      "properties": {
+        "id": { "$ref": "#/definitions/ulid" },
+        "name": { "type": "string" },
+        "storage": { "type": "string", "enum": ["external", "inProject"] },
+        "location": { "type": "string" },
+        "pixelWidth": { "type": ["integer", "null"], "default": null },
+        "pixelHeight": { "type": ["integer", "null"], "default": null }
+      },
+      "additionalProperties": true
+    },
+
+    "atlasPage": {
+      "type": "object",
+      "description": "图集页：引用一张纹理资产，承载若干区域。",
+      "required": ["id", "name", "textureAssetId", "width", "height"],
+      "properties": {
+        "id": { "$ref": "#/definitions/ulid" },
+        "name": { "type": "string" },
+        "textureAssetId": { "$ref": "#/definitions/ulid", "description": "必须指向已存在的 TextureAsset（跨全工程校验）。" },
+        "width": { "type": "integer", "exclusiveMinimum": 0, "description": "页宽，单位：像素。" },
+        "height": { "type": "integer", "exclusiveMinimum": 0, "description": "页高，单位：像素。" }
+      },
+      "additionalProperties": true
+    },
+
+    "atlasRegion": {
+      "type": "object",
+      "description": "图集区域：资源记录，不是节点。所有尺寸/偏移单位为像素。",
+      "required": ["id", "name", "pageId", "packedW", "packedH", "originalW", "originalH"],
+      "properties": {
+        "id": { "$ref": "#/definitions/ulid" },
+        "name": { "type": "string" },
+        "pageId": { "$ref": "#/definitions/ulid", "description": "必须属于同一 Atlas（RFC §2.8.2）。" },
+        "packedX": { "type": "integer", "minimum": 0, "default": 0 },
+        "packedY": { "type": "integer", "minimum": 0, "default": 0 },
+        "packedW": { "type": "integer", "exclusiveMinimum": 0, "description": "打包矩形宽（精灵自身坐标系）。" },
+        "packedH": { "type": "integer", "exclusiveMinimum": 0, "description": "打包矩形高（精灵自身坐标系）。" },
+        "rotation": {
+          "type": "string",
+          "description": "打包旋转。90/270 时页内实际占位转置为 (packedH, packedW)。",
+          "enum": ["none", "90", "180", "270"],
+          "default": "none"
+        },
+        "originalW": { "type": "integer", "exclusiveMinimum": 0, "description": "未裁切原始宽。" },
+        "originalH": { "type": "integer", "exclusiveMinimum": 0, "description": "未裁切原始高。" },
+        "trimmedW": { "type": "integer", "exclusiveMinimum": 0, "description": "裁切后宽，方向与 original 一致（不受打包旋转影响）。" },
+        "trimmedH": { "type": "integer", "exclusiveMinimum": 0, "description": "裁切后高，方向与 original 一致（不受打包旋转影响）。" },
+        "offsetX": { "type": "integer", "minimum": 0, "default": 0, "description": "trim 偏移，方向与 original 一致。" },
+        "offsetY": { "type": "integer", "minimum": 0, "default": 0, "description": "trim 偏移，方向与 original 一致。" }
+      },
+      "additionalProperties": true
+    },
+
+    "atlas": {
+      "type": "object",
+      "description": "图集：一组页与区域的集合。",
+      "required": ["id", "name", "pages", "regions"],
+      "properties": {
+        "id": { "$ref": "#/definitions/ulid" },
+        "name": { "type": "string" },
+        "pages": { "type": "array", "items": { "$ref": "#/definitions/atlasPage" } },
+        "regions": { "type": "array", "items": { "$ref": "#/definitions/atlasRegion" } }
+      },
+      "additionalProperties": true
+    },
+
+    "scene": {
+      "type": "object",
+      "description": "场景。v1 单场景契约下恰好一项。",
+      "required": ["id", "name", "rootNodeId"],
+      "properties": {
+        "id": { "$ref": "#/definitions/ulid" },
+        "name": { "type": "string" },
+        "rootNodeId": { "$ref": "#/definitions/ulid", "description": "该场景唯一的树根节点（type=root）。" }
+      },
+      "additionalProperties": true
+    },
+
+    "projectData": {
+      "type": "object",
+      "description": "工程数据内容。",
+      "required": [
+        "id",
+        "name",
+        "rootNodeId",
+        "defaultSceneIndex",
+        "scenes",
+        "nodes",
+        "nodeOrder",
+        "assets",
+        "textures",
+        "atlases"
+      ],
+      "properties": {
+        "id": { "$ref": "#/definitions/ulid" },
+        "name": { "type": "string" },
+        "rootNodeId": { "$ref": "#/definitions/ulid", "description": "冗余兼容字段，必须等于 scenes[0].rootNodeId（RFC §2.2）。" },
+        "defaultSceneIndex": { "type": "integer", "minimum": 0, "default": 0 },
+        "scenes": { "type": "array", "items": { "$ref": "#/definitions/scene" }, "minItems": 1, "maxItems": 1 },
+        "nodes": { "type": "array", "items": { "$ref": "#/definitions/node" } },
+        "nodeOrder": { "type": "array", "items": { "$ref": "#/definitions/ulid" } },
+        "assets": { "type": "array", "items": { "$ref": "#/definitions/imageAsset" } },
+        "textures": { "type": "array", "items": { "$ref": "#/definitions/textureAsset" } },
+        "atlases": { "type": "array", "items": { "$ref": "#/definitions/atlas" } }
+      },
+      "additionalProperties": true
+    }
+  },
+
+  "type": "object",
+  "required": ["formatId", "formatVersion", "minimumReaderVersion", "project"],
+  "properties": {
+    "formatId": {
+      "type": "string",
+      "const": "loongbones.native-project",
+      "description": "格式标识。不匹配必须拒绝，不得猜测或降级。"
+    },
+    "formatVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "持久化契约版本。v1 恒为 1。"
+    },
+    "minimumReaderVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "能正确读取本文档所需的最低 Reader 版本。高于本 Reader 上限时拒绝打开。"
+    },
+    "appVersion": {
+      "type": "string",
+      "description": "写出本文档的应用版本（可选）。与 formatVersion 分离。"
+    },
+    "capabilities": {
+      "type": "object",
+      "description": "能力 / 扩展声明。required 中出现未知项必须拒绝打开。",
+      "properties": {
+        "required": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "optional": { "type": "array", "items": { "type": "string" }, "default": [] }
+      },
+      "additionalProperties": true,
+      "default": {}
+    },
+    "project": { "$ref": "#/definitions/projectData" }
+  },
+
+  "additionalProperties": true
+}

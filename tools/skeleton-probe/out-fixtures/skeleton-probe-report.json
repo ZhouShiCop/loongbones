@@ -1,0 +1,451 @@
+{
+ "_note": "Loongbones Task 4 阶段 A · 骨架只读探针输出。仅含相对路径、hash、计数与分类计数，不含任何游戏资源本体。",
+ "generatedBy": "tools/skeleton-probe/probe.mjs",
+ "corpusRootRef": "LOONGBONES_CORPUS_ROOT（本地配置/环境变量，不写入本文件）",
+ "readerNote": "解析用旧项目 converter/src/read/binary32.ts + converter/src/atlas.ts（证据参照）；产品读取器在阶段 B 独立实现。",
+ "elapsedSec": 0,
+ "totals": {
+  "files": 3,
+  "bones": 8,
+  "slots": 5,
+  "skins": 3,
+  "animations": 0,
+  "timelines": 0,
+  "ik": 0,
+  "transform": 0,
+  "pathConstraints": 0,
+  "events": 0,
+  "regionAttachments": 4,
+  "meshAttachments": 0,
+  "weightedMeshAttachments": 0,
+  "linkedMeshAttachments": 0,
+  "boundingboxAttachments": 0,
+  "otherAttachments": 0,
+  "boneTimelines": 0,
+  "slotTimelines": 0,
+  "deformTimelines": 0,
+  "ikTimelines": 0,
+  "drawOrderTimelines": 0,
+  "eventTimelines": 0,
+  "transformTimelines": 0,
+  "multiSkinUnits": 0,
+  "multiPageAtlases": 0
+ },
+ "primaryTotals": {
+  "files": 0,
+  "bones": 0,
+  "slots": 0,
+  "skins": 0,
+  "animations": 0,
+  "timelines": 0,
+  "ik": 0,
+  "transform": 0,
+  "pathConstraints": 0,
+  "events": 0,
+  "regionAttachments": 0,
+  "meshAttachments": 0,
+  "weightedMeshAttachments": 0,
+  "linkedMeshAttachments": 0,
+  "boundingboxAttachments": 0,
+  "otherAttachments": 0,
+  "boneTimelines": 0,
+  "slotTimelines": 0,
+  "deformTimelines": 0,
+  "ikTimelines": 0,
+  "drawOrderTimelines": 0,
+  "eventTimelines": 0,
+  "transformTimelines": 0,
+  "multiSkinUnits": 0,
+  "multiPageAtlases": 0
+ },
+ "stats": {
+  "parseOk": 3,
+  "parseFail": 1,
+  "failClasses": {
+   "parse-error": 1
+  },
+  "strictEofFailures": 0,
+  "versions": [
+   "3.2.01"
+  ],
+  "distinctSkeletonHash": 1,
+  "nonessentialTrue": 0,
+  "nonessentialFalse": 3,
+  "imagesPathPresent": 0,
+  "trioComplete": 2,
+  "atlasTxtPresent": 2,
+  "pngPresent": 2,
+  "readerWarningsTotal": 1,
+  "readerDropsTotal": 0,
+  "referenceClosedAll": 2,
+  "referenceNotClosed": 1,
+  "boneParentOutOfRange": 1,
+  "boneParentForward": 0,
+  "boneParentSelfCycle": 0,
+  "boneRoots": 3,
+  "slotBoneOutOfRange": 0,
+  "ikRefOutOfRange": 0,
+  "transformRefOutOfRange": 0,
+  "duplicateBoneNames": 0,
+  "duplicateSlotNames": 0,
+  "duplicateAttachmentNames": 0,
+  "attachmentPathPresent": 1,
+  "attachmentPathNull": 3,
+  "attachmentPathDiffersFromName": 1,
+  "regionRotationNonZero": 1,
+  "regionScaleNotOne": 0,
+  "meshUvOutOfRange": 0,
+  "triangleIndexOutOfRange": 0,
+  "atlasRegions": 4,
+  "atlasPages": 2,
+  "atlasRotateTrue": 1,
+  "atlasRotateFalse": 3,
+  "atlasRotateOther": 0,
+  "atlasTrimmed": 0,
+  "atlasSizeNeOrig": 0,
+  "atlasIndexNeMinusOne": 0,
+  "atlasPngMissing": 0,
+  "atlasPngIhdrMatch": 2,
+  "atlasPngIhdrMismatch": 0,
+  "atlasPageSizePresent": 2,
+  "atlasPageSizeMissing": 0,
+  "atlasRegionOutOfPageDeclared": 0,
+  "regionLookupByPathHit": 4,
+  "regionLookupByPathMiss": 0,
+  "regionLookupByNameHit": 3,
+  "regionLookupByNameMiss": 1
+ },
+ "atlasPageVsPngRatioTop": [
+  [
+   "1.000",
+   2
+  ]
+ ],
+ "entries": [
+  {
+   "path": "01-minimal.skel.bytes",
+   "size": 150,
+   "sha256": "a2dc929014dab9c38f392aa0ce4733c5b02a1aef7c2735f58c9834d12d0ae873",
+   "isPrimary": false,
+   "companion": {
+    "atlasTxt": true,
+    "atlas": false,
+    "png": true
+   },
+   "trio": true,
+   "parse": "ok",
+   "readerWarnings": 0,
+   "readerDrops": 0,
+   "version": "3.2.01",
+   "skeletonHash": "loongbones-fixture",
+   "width": 64,
+   "height": 64,
+   "nonessential": false,
+   "imagesPath": null,
+   "counts": {
+    "bones": 1,
+    "slots": 1,
+    "skins": 1,
+    "animations": 0,
+    "timelines": 0,
+    "ik": 0,
+    "transform": 0,
+    "path": 0,
+    "events": 0
+   },
+   "timelineKinds": {
+    "bone": 0,
+    "slot": 0,
+    "deform": 0,
+    "ik": 0,
+    "drawOrder": 0,
+    "event": 0,
+    "other": 0
+   },
+   "reference": {
+    "boneParentOutOfRange": 0,
+    "boneParentForward": 0,
+    "boneParentSelfCycle": 0,
+    "boneRootCount": 1,
+    "slotBoneOutOfRange": 0,
+    "ikBoneOutOfRange": 0,
+    "ikTargetOutOfRange": 0,
+    "transformBoneOutOfRange": 0,
+    "transformTargetOutOfRange": 0,
+    "skinSlotOutOfRange": 0,
+    "unresolvedBoneParentNames": 0,
+    "unresolvedSlotBoneNames": 0
+   },
+   "referenceClosed": true,
+   "nameDuplicates": {
+    "bones": 0,
+    "slots": 0,
+    "attachmentsPerSlot": 0
+   },
+   "attachments": {
+    "region": 1,
+    "mesh": 0,
+    "weightedMesh": 0,
+    "linkedMesh": 0,
+    "boundingbox": 0,
+    "other": 0,
+    "total": 1,
+    "pathPresent": 0,
+    "pathDiffersFromName": 0,
+    "pathNull": 1,
+    "regionRotationNonZero": 0,
+    "regionScaleNotOne": 0,
+    "meshUvOutOfRange": 0,
+    "triangleIndexOutOfRange": 0
+   },
+   "atlas": {
+    "pages": 1,
+    "regions": 1,
+    "rotateTrue": 0,
+    "rotateFalse": 1,
+    "rotateOther": 0,
+    "trimmed": 0,
+    "sizeNeOrig": 0,
+    "indexNeMinusOne": 0,
+    "pngIhdrMatch": 1,
+    "pngIhdrMismatch": 0,
+    "pngMissing": 0,
+    "pageSizePresent": 1,
+    "pageSizeMissing": 0,
+    "regionOutOfPageDeclared": 0,
+    "maxExtentW": 32,
+    "maxExtentH": 32,
+    "regionLookupByPath": {
+     "hit": 1,
+     "miss": 0
+    },
+    "regionLookupByName": {
+     "hit": 1,
+     "miss": 0
+    },
+    "pageSize": [
+     64,
+     64
+    ],
+    "pngSize": [
+     64,
+     64
+    ],
+    "pngOverPageRatio": [
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "path": "02-nested-slots-regions.skel.bytes",
+   "size": 415,
+   "sha256": "df0591d1692910f3bbacefebf93cb92dac496fdd5884186d44fe4bc6be46e869",
+   "isPrimary": false,
+   "companion": {
+    "atlasTxt": true,
+    "atlas": false,
+    "png": true
+   },
+   "trio": true,
+   "parse": "ok",
+   "readerWarnings": 0,
+   "readerDrops": 0,
+   "version": "3.2.01",
+   "skeletonHash": "loongbones-fixture",
+   "width": 128,
+   "height": 128,
+   "nonessential": false,
+   "imagesPath": null,
+   "counts": {
+    "bones": 4,
+    "slots": 3,
+    "skins": 1,
+    "animations": 0,
+    "timelines": 0,
+    "ik": 0,
+    "transform": 0,
+    "path": 0,
+    "events": 0
+   },
+   "timelineKinds": {
+    "bone": 0,
+    "slot": 0,
+    "deform": 0,
+    "ik": 0,
+    "drawOrder": 0,
+    "event": 0,
+    "other": 0
+   },
+   "reference": {
+    "boneParentOutOfRange": 0,
+    "boneParentForward": 0,
+    "boneParentSelfCycle": 0,
+    "boneRootCount": 1,
+    "slotBoneOutOfRange": 0,
+    "ikBoneOutOfRange": 0,
+    "ikTargetOutOfRange": 0,
+    "transformBoneOutOfRange": 0,
+    "transformTargetOutOfRange": 0,
+    "skinSlotOutOfRange": 0,
+    "unresolvedBoneParentNames": 0,
+    "unresolvedSlotBoneNames": 0
+   },
+   "referenceClosed": true,
+   "nameDuplicates": {
+    "bones": 0,
+    "slots": 0,
+    "attachmentsPerSlot": 0
+   },
+   "attachments": {
+    "region": 3,
+    "mesh": 0,
+    "weightedMesh": 0,
+    "linkedMesh": 0,
+    "boundingbox": 0,
+    "other": 0,
+    "total": 3,
+    "pathPresent": 1,
+    "pathDiffersFromName": 1,
+    "pathNull": 2,
+    "regionRotationNonZero": 1,
+    "regionScaleNotOne": 0,
+    "meshUvOutOfRange": 0,
+    "triangleIndexOutOfRange": 0
+   },
+   "atlas": {
+    "pages": 1,
+    "regions": 3,
+    "rotateTrue": 1,
+    "rotateFalse": 2,
+    "rotateOther": 0,
+    "trimmed": 0,
+    "sizeNeOrig": 0,
+    "indexNeMinusOne": 0,
+    "pngIhdrMatch": 1,
+    "pngIhdrMismatch": 0,
+    "pngMissing": 0,
+    "pageSizePresent": 1,
+    "pageSizeMissing": 0,
+    "regionOutOfPageDeclared": 0,
+    "maxExtentW": 96,
+    "maxExtentH": 64,
+    "regionLookupByPath": {
+     "hit": 3,
+     "miss": 0
+    },
+    "regionLookupByName": {
+     "hit": 2,
+     "miss": 1
+    },
+    "pageSize": [
+     128,
+     128
+    ],
+    "pngSize": [
+     128,
+     128
+    ],
+    "pngOverPageRatio": [
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "path": "03-bad-parent-index.skel.bytes",
+   "size": 167,
+   "sha256": "4b0a227ffdf70ac1e7f170bbd8d5ce66b0df07165ee2080053ad2ddfe404cd0d",
+   "isPrimary": false,
+   "companion": {
+    "atlasTxt": false,
+    "atlas": false,
+    "png": false
+   },
+   "trio": false,
+   "parse": "ok",
+   "readerWarnings": 1,
+   "readerDrops": 0,
+   "version": "3.2.01",
+   "skeletonHash": "loongbones-fixture",
+   "width": 64,
+   "height": 64,
+   "nonessential": false,
+   "imagesPath": null,
+   "counts": {
+    "bones": 3,
+    "slots": 1,
+    "skins": 1,
+    "animations": 0,
+    "timelines": 0,
+    "ik": 0,
+    "transform": 0,
+    "path": 0,
+    "events": 0
+   },
+   "timelineKinds": {
+    "bone": 0,
+    "slot": 0,
+    "deform": 0,
+    "ik": 0,
+    "drawOrder": 0,
+    "event": 0,
+    "other": 0
+   },
+   "reference": {
+    "boneParentOutOfRange": 1,
+    "boneParentForward": 0,
+    "boneParentSelfCycle": 0,
+    "boneRootCount": 1,
+    "slotBoneOutOfRange": 0,
+    "ikBoneOutOfRange": 0,
+    "ikTargetOutOfRange": 0,
+    "transformBoneOutOfRange": 0,
+    "transformTargetOutOfRange": 0,
+    "skinSlotOutOfRange": 0,
+    "unresolvedBoneParentNames": 0,
+    "unresolvedSlotBoneNames": 0
+   },
+   "referenceClosed": false,
+   "nameDuplicates": {
+    "bones": 0,
+    "slots": 0,
+    "attachmentsPerSlot": 0
+   },
+   "attachments": {
+    "region": 0,
+    "mesh": 0,
+    "weightedMesh": 0,
+    "linkedMesh": 0,
+    "boundingbox": 0,
+    "other": 0,
+    "total": 0,
+    "pathPresent": 0,
+    "pathDiffersFromName": 0,
+    "pathNull": 0,
+    "regionRotationNonZero": 0,
+    "regionScaleNotOne": 0,
+    "meshUvOutOfRange": 0,
+    "triangleIndexOutOfRange": 0
+   },
+   "atlas": {
+    "missing": true
+   }
+  },
+  {
+   "path": "04-truncated.skel.bytes",
+   "size": 142,
+   "sha256": "5653a06ba3cc0d930141ca2741be3597d88367e36857f2abc69b7f3262ccdc69",
+   "isPrimary": false,
+   "companion": {
+    "atlasTxt": false,
+    "atlas": false,
+    "png": false
+   },
+   "trio": false,
+   "parse": "fail",
+   "parseError": "读取 float 越界",
+   "failClass": "parse-error"
+  }
+ ]
+}

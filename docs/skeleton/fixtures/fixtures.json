@@ -1,0 +1,40 @@
+{
+ "_note": "合成 fixture，不含任何游戏资产。",
+ "generatedBy": "tools/skeleton-probe/make-fixture.mjs",
+ "items": [
+  {
+   "fixture": "01-minimal",
+   "files": [
+    "01-minimal.skel.bytes",
+    "01-minimal.atlas.txt",
+    "01-minimal.png"
+   ]
+  },
+  {
+   "fixture": "02-nested-slots-regions",
+   "files": [
+    "02-nested-slots-regions.skel.bytes",
+    "02-nested-slots-regions.atlas.txt",
+    "02-nested-slots-regions.png"
+   ]
+  },
+  {
+   "fixture": "03-bad-parent-index",
+   "files": [
+    "03-bad-parent-index.skel.bytes"
+   ]
+  },
+  {
+   "fixture": "04-truncated",
+   "files": [
+    "04-truncated.skel.bytes"
+   ]
+  },
+  {
+   "fixture": "05-non-finite-float",
+   "files": [
+    "05-non-finite-float.skel.bytes"
+   ]
+  }
+ ]
+}

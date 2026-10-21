@@ -1,0 +1,3 @@
+add_executable(loongbones_atlas_import_smoke src/main.cpp)
+target_link_libraries(loongbones_atlas_import_smoke PRIVATE loongbones_spine32_atlas)
+target_compile_features(loongbones_atlas_import_smoke PRIVATE cxx_std_17)

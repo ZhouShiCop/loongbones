@@ -1,0 +1,81 @@
+{
+  "formatId": "loongbones.native-project",
+  "formatVersion": 1,
+  "minimumReaderVersion": 1,
+  "project": {
+    "id": "01J8Z000000000000000000000",
+    "name": "cross-atlas-page-reference",
+    "rootNodeId": "01J8Z000000000000000000002",
+    "defaultSceneIndex": 0,
+    "scenes": [
+      {
+        "id": "01J8Z000000000000000000001",
+        "name": "Scene",
+        "rootNodeId": "01J8Z000000000000000000002"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "01J8Z000000000000000000002",
+        "name": "root",
+        "type": "root",
+        "parent": null,
+        "children": [],
+        "transform": { "x": 0.0, "y": 0.0, "rotationDeg": 0.0, "scaleX": 1.0, "scaleY": 1.0 },
+        "assetId": null,
+        "regionId": null
+      }
+    ],
+    "nodeOrder": ["01J8Z000000000000000000002"],
+    "assets": [],
+    "textures": [
+      {
+        "id": "01J8Z000000000000000000007",
+        "name": "t",
+        "storage": "external",
+        "location": "t.png",
+        "pixelWidth": 100,
+        "pixelHeight": 100
+      }
+    ],
+    "atlases": [
+      {
+        "id": "01J8Z000000000000000000008",
+        "name": "a0",
+        "pages": [
+          {
+            "id": "01J8Z000000000000000000009",
+            "name": "p0",
+            "textureAssetId": "01J8Z000000000000000000007",
+            "width": 100,
+            "height": 100
+          }
+        ],
+        "regions": []
+      },
+      {
+        "id": "01J8Z00000000000000000000D",
+        "name": "a1",
+        "pages": [],
+        "regions": [
+          {
+            "id": "01J8Z00000000000000000000A",
+            "name": "hero",
+            "pageId": "01J8Z000000000000000000009",
+            "packedX": 0,
+            "packedY": 0,
+            "packedW": 10,
+            "packedH": 10,
+            "rotation": "none",
+            "originalW": 10,
+            "originalH": 10,
+            "trimmedW": 10,
+            "trimmedH": 10,
+            "offsetX": 0,
+            "offsetY": 0
+          }
+        ]
+      }
+    ]
+  }
+}

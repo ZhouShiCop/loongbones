@@ -1,0 +1,202 @@
+{
+  "formatId": "loongbones.native-project",
+  "formatVersion": 1,
+  "minimumReaderVersion": 1,
+  "appVersion": "0.1.0-dev",
+  "capabilities": {
+    "required": [],
+    "optional": [
+      "loongbones.example.optional"
+    ]
+  },
+  "vendorNote": "synthetic fixture - no third-party asset data",
+  "project": {
+    "id": "01J8Z000000000000000000000",
+    "name": "full",
+    "rootNodeId": "01J8Z000000000000000000002",
+    "defaultSceneIndex": 0,
+    "customTag": 42,
+    "scenes": [
+      {
+        "id": "01J8Z000000000000000000001",
+        "name": "Scene",
+        "rootNodeId": "01J8Z000000000000000000002"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "01J8Z000000000000000000002",
+        "name": "root",
+        "type": "root",
+        "parent": null,
+        "children": [
+          "01J8Z000000000000000000003",
+          "01J8Z000000000000000000004",
+          "01J8Z000000000000000000005"
+        ],
+        "transform": {
+          "x": 0.0,
+          "y": 0.0,
+          "rotationDeg": 0.0,
+          "scaleX": 1.0,
+          "scaleY": 1.0
+        },
+        "visible": true,
+        "locked": false,
+        "assetId": null,
+        "regionId": null,
+        "editorColor": "#336699"
+      },
+      {
+        "id": "01J8Z000000000000000000003",
+        "name": "group",
+        "type": "group",
+        "parent": "01J8Z000000000000000000002",
+        "children": [],
+        "transform": {
+          "x": 10.0,
+          "y": -4.5,
+          "rotationDeg": 15.0,
+          "scaleX": 2.0,
+          "scaleY": 0.5
+        },
+        "visible": true,
+        "locked": true,
+        "assetId": null,
+        "regionId": null
+      },
+      {
+        "id": "01J8Z000000000000000000004",
+        "name": "image",
+        "type": "image",
+        "parent": "01J8Z000000000000000000002",
+        "children": [],
+        "transform": {
+          "x": 1.0,
+          "y": 2.0,
+          "rotationDeg": 0.0,
+          "scaleX": 1.0,
+          "scaleY": 1.0
+        },
+        "visible": true,
+        "locked": false,
+        "assetId": "01J8Z000000000000000000006",
+        "regionId": null
+      },
+      {
+        "id": "01J8Z000000000000000000005",
+        "name": "sprite",
+        "type": "image",
+        "parent": "01J8Z000000000000000000002",
+        "children": [],
+        "transform": {
+          "x": -3.25,
+          "y": 7.5,
+          "rotationDeg": 30.0,
+          "scaleX": 1.5,
+          "scaleY": 1.5
+        },
+        "visible": true,
+        "locked": false,
+        "assetId": null,
+        "regionId": "01J8Z00000000000000000000A"
+      }
+    ],
+    "nodeOrder": [
+      "01J8Z000000000000000000002",
+      "01J8Z000000000000000000003",
+      "01J8Z000000000000000000004",
+      "01J8Z000000000000000000005"
+    ],
+    "assets": [
+      {
+        "id": "01J8Z000000000000000000006",
+        "name": "img",
+        "type": "static",
+        "storage": "external",
+        "location": "img.png",
+        "pixelWidth": 64,
+        "pixelHeight": 48
+      }
+    ],
+    "textures": [
+      {
+        "id": "01J8Z000000000000000000007",
+        "name": "t",
+        "storage": "external",
+        "location": "t.png",
+        "pixelWidth": 200,
+        "pixelHeight": 200
+      }
+    ],
+    "atlases": [
+      {
+        "id": "01J8Z000000000000000000008",
+        "name": "a",
+        "pages": [
+          {
+            "id": "01J8Z000000000000000000009",
+            "name": "p0",
+            "textureAssetId": "01J8Z000000000000000000007",
+            "width": 200,
+            "height": 200
+          }
+        ],
+        "regions": [
+          {
+            "id": "01J8Z00000000000000000000A",
+            "name": "hero",
+            "pageId": "01J8Z000000000000000000009",
+            "packedX": 0,
+            "packedY": 0,
+            "packedW": 64,
+            "packedH": 48,
+            "rotation": "none",
+            "originalW": 64,
+            "originalH": 48,
+            "trimmedW": 64,
+            "trimmedH": 48,
+            "offsetX": 0,
+            "offsetY": 0
+          },
+          {
+            "id": "01J8Z00000000000000000000B",
+            "name": "hero_rot90",
+            "pageId": "01J8Z000000000000000000009",
+            "packedX": 100,
+            "packedY": 0,
+            "packedW": 64,
+            "packedH": 48,
+            "rotation": "90",
+            "originalW": 64,
+            "originalH": 48,
+            "trimmedW": 64,
+            "trimmedH": 48,
+            "offsetX": 0,
+            "offsetY": 0
+          },
+          {
+            "id": "01J8Z00000000000000000000C",
+            "name": "hero_trimmed",
+            "pageId": "01J8Z000000000000000000009",
+            "packedX": 100,
+            "packedY": 100,
+            "packedW": 60,
+            "packedH": 40,
+            "rotation": "none",
+            "originalW": 80,
+            "originalH": 60,
+            "trimmedW": 60,
+            "trimmedH": 40,
+            "offsetX": 10,
+            "offsetY": 12,
+            "packerMeta": {
+              "tool": "synthetic",
+              "note": "unknown optional field must survive round-trip"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+# Loongbones 忽略规则（规范 `项目规范.md` §8.2、§9.1）
+#
+# 原则只忽略「能从源码重建的本地产物」与 IDE 文件；**不忽略任何可能属于源数据
+# 或夹具的类型**（不写 *.json / *.png / *.bin 这类宽泛规则）。
+
+# ---- 构建目录（顶层、以 build 开头；CMake out-of-source 产物）----
+/build*/
+
+# ---- 本地运行产物：构建/测试/语料扫描的输出 ----
+# 规范 §8.2：运行日志、临时导出、崩溃转储不进源码目录或发行包。
+*.log
+*.err
+
+# ---- 工具生成目录（可删可重建，见 STRUCTURE.md 各工具条目的「输出」）----
+tools/corpus-scan/out/
+tools/skeleton-probe/out/
+
+# ---- IDE / 编辑器 / 系统 ----
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
