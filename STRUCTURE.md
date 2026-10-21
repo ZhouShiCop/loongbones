@@ -35,8 +35,8 @@
 | `docs/format/native-project-v2-skeleton.md` | 原生格式 v2（Skeleton 增量）Schema 冻结稿：完整 JSON 示例、字段必需性/默认值、枚举字符串、ID 规则、未知字段锚点、required capability、迁移与错误码、资源落地策略、诊断等级 | Task 4 阶段 B **B0 复核通过**；不改写已审阅的 v1 RFC |
 | `docs/skeleton/mesh-and-constraint-rfc.md` | **Task 5 A2**：第二批附件与约束 canonical 模型提案（mesh / weightedMesh / linkedMesh / boundingbox 占位 / IK / transform；含顶点空间证据与 golden 计划、TBD-A…TBD-F） | **阶段 A 提案，待负责人审阅**；实现归阶段 B |
 | `docs/format/native-project-v3-mesh.md` | **Task 5 A3**：原生格式 v3 Schema 提案（v2 + 第二批骨架类型增量；`formatVersion = 3`、迁移链 v1→v2→v3、不引入新 capability，D29） | **阶段 A 提案，待负责人审阅**；不改写 v2 冻结稿 |
-| `Agent_Task/Task5.md` | Task 5 第二批静态数据建模与导入规格（含 A1 取证报告、复核记录、A2/A3 提案指针） | **阶段 A 六项全部完成并验收通过（2026-10-22，见 `Agent_Task/Task5_A6_Acceptance.md`）**；阶段 B 待批准 |
-| `Agent_Task/Task5_Implementation_Plan.md` | **Task 5 阶段 B 方案**：B1 Domain 第二批类型 → B2 原生格式 v3（三读一写）→ B3 Reader/Mapper → B4 插件诊断 → B5 语料闭环 | **提案，待负责人批准**；开工前置 R1＝B6 遗留改动须先建基线提交 |
+| `Agent_Task/Task5.md` | Task 5 第二批静态数据建模与导入规格（含 A1 取证报告、复核记录、A2/A3 提案指针） | **阶段 A 六项全部完成并验收通过（2026-10-22，见 `Agent_Task/Task5_A6_Acceptance.md`）**；**阶段 B 已于 2026-10-22 批准并开工（实现会话执行中）** |
+| `Agent_Task/Task5_Implementation_Plan.md` | **Task 5 阶段 B 方案**：B1 Domain 第二批类型 → B2 原生格式 v3（三读一写）→ B3 Reader/Mapper → B4 插件诊断 → B5 语料闭环 | **已批准（2026-10-22），阶段 B 执行中**；R1 已满足（B6 基线已提交） |
 | `Agent_Task/Task5_A6_Acceptance.md` | Task 5 阶段 A 验收记录（交付物、停点纪律、一致性 5 项、未决项、阶段 B 开工前置） | **阶段 A 验收通过** |
 | `Agent_Task/Task6.md` | Task 6 共享图集布局（B6 已知缺口，2 个单位）独立规格 | 待负责人裁定 Q6-1…Q6-3 |
 | `tools/skeleton-probe/` | Spine 3.2.01 骨架契约只读探针 + 合成 fixture 生成器（登记见 §2.4） | Task 4 阶段 A 已交付 |
