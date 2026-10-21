@@ -1,8 +1,9 @@
 # Loongbones 数据类型报告：已实现清单与后续待实现清单
 
-- 日期：2026-10-21
+- 日期：2026-10-21（**2026-10-22 就地更新 §3「去向」列与类型计数**，见该节框注）
 - 范围：`Task4` 阶段 B 收尾时的**类型完整性盘查**，覆盖 `domain/`、`importers/api`、
   `importers/host`、`importers/spine32` 的 canonical 类型
+- 性质：**Task 4 的历史快照**。盘查事实未改；凡与后续裁定（D29–D33）冲突的**去向/方案**表述已就地修正
 - 判定：被误删后重建的实现文件，其**声明的符号与字段全部有定义，零缺失**；
   但 canonical 体系按设计**尚未覆盖** mesh 族 / 动画 / 约束 / 事件
 
@@ -77,15 +78,20 @@
 ## 3. 接下来要实现的类型
 
 这些**不是遗漏**，而是 v2 schema §10「v2 明确不包含的内容」的排除清单。
-下表附本次 1113 个语料单位的实测规模，缺口大小可直接量化：
+下表附本次 1113 个语料单位的实测规模，缺口大小可直接量化。
 
-| 待实现 | 语料实测 | 去向 |
+> **2026-10-22 就地更新（F7）**：本表原写「后续任务 + **独立 capability**」，与
+> `DECISIONS.md` **D29**（第二批**直接增量改结构并升 v3**，**不做 capability 协商层**）冲突，
+> 已按 D29–D33 改写「去向」列。**盘查结论（哪些类型未实现、语料规模）是 Task 4 的既有事实，未改。**
+> 类型计数按 `tools/skeleton-probe/type-byte-census.mjs`（TBD-F 直接普查）同步。
+
+| 待实现 | 语料实测 | 去向（按 D29–D33） |
 |---|---|---|
-| **动画 / 全部时间线**（含 deform、事件） | `timelines` **4,988,424**<br>`deformTimelines` 335,817<br>`animations` 16,007<br>`events` 1 | 后续任务。**占比最大的缺口** |
-| **WeightedMesh / 权重绑定** | `weightedMesh` **17,271**<br>`weightedLinkedMesh` 2 | 后续任务 + 独立 capability |
-| **MeshAttachment / LinkedMesh** | `mesh` **2,979** | 同上 |
-| **BoundingBox 附件** | 类型 1 | 同上 |
-| **IK / Transform / Path 约束** | `ikConstraints` **2,707**<br>`transformConstraints` 208 | 同上 |
+| **动画 / 全部时间线**（含 deform、事件） | `timelines` **4,988,424**<br>`deformTimelines` 335,817<br>`animations` 16,007<br>`events` 1 | 后续任务。**占比最大的缺口**；且被 **V3 时基未决**阻塞，不在 Task 5 范围内 |
+| **WeightedMesh / 权重绑定** | `weightedMesh` **17,271**<br>`weightedLinkedMesh` **2**（类型字节 5，普查确认） | **Task 5**：直接进 v3 schema（D29）；权重保留原值、导入校验、求值侧归一化（**D30**）；**负权重合法（含义＝该绑定对顶点无影响，D34）**。模型见 `docs/skeleton/mesh-and-constraint-rfc.md` §5；fixture `07-weighted-mesh` |
+| **MeshAttachment / LinkedMesh** | `mesh` **2,979**<br>`linkedMesh`（类型字节 4）**0**<br>`weightedLinkedMesh`（类型字节 5）**2** | **Task 5**：同上。`parentKey` 支持父为 mesh 与 weightedMesh 两种、`(slotId, attachmentName)` 引用、**不复制几何**；非加权 linked **语料无真实样本**，已由合成 fixture `08-linked-mesh` 覆盖（D13：不作兼容声明） |
+| **BoundingBox 附件** | 类型 1，**语料 0 例** | **D32：留空** —— 只保留类型占位与诊断码，不解析、不映射、不导入 |
+| **IK / Transform / Path 约束** | `ikConstraints` **2,707**<br>`transformConstraints` 208<br>`path` 约束 3.2.01 无此分支 | **Task 5**：IK 新增 `enabled` 布尔记录是否开启（**D35**）；transform 的 4×mix / 6×offset **原值承载、不解释语义**（**D36**，求值器在 V3 取证前不得读取计算）；path 不建模。fixture `11-constraints` |
 | `SkeletonNode`（场景中的骨架实例） | — | 会改 v1 `SceneNode::type` 枚举，**另立任务**（D27） |
 | 多皮肤换装 / 皮肤混合 | — | 后续任务（语料无真实样本，T-B4） |
 | 外部引用纹理的导入产出 | — | 保留 `external` 枚举值供用户显式使用，**导入器不产出** |

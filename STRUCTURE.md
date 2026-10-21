@@ -30,9 +30,15 @@
 | `tools/atlas-import-smoke/` | Task 4 B1 无 GUI Atlas + PNG 导入入口 | `cmake --build build_b1 --target loongbones_atlas_import_smoke`；参数、安全边界和 warning 确认见同目录 README |
 | `docs/skeleton/B1_REPORT.md` | Task 4 B1 Atlas + PNG 首片交付、行为边界与验证证据 | **实现与验证完成，待负责人复核** |
 | `docs/skeleton/` | 骨架模块设计（Task 4）：Skeleton Domain 与原生格式兼容提案、插件宿主契约、字段映射表、样本 manifest、合成 fixture、验收报告 |
-| `Agent_Task/DataType_Report.md` | **Loongbones 数据类型报告**：已实现 canonical 类型总表、被误删重建文件的符号/字段核对结果、后续待实现类型（含语料实测规模）与残余风险 | **阶段 A 与 B0 复核通过；B1 实现与验证完成、待复核；B2/B3 实现完成；B4 Reader 全语料 1113/1113 精确到达 EOF、27 项测试通过（交付边界＝结构可读）；B5 Atlas Reader + Mapper 完成、32 项测试、全语料 region 未命中 0；B6 实现与验证完成、待复核**。报告见 `docs/skeleton/B1_REPORT.md`、`B3_REPORT.md`、`task4_B4.md`、`B5_REPORT.md`、`B6_REPORT.md` |
+| `Agent_Task/DataType_Report.md` | **Loongbones 数据类型报告**：已实现 canonical 类型总表、被误删重建文件的符号/字段核对结果、后续待实现类型（含语料实测规模）与残余风险 | **阶段 A 与 B0 复核通过；B1 实现与验证完成、待复核；B2/B3 实现完成；B4 Reader 全语料 1113/1113 精确到达 EOF、27 项测试通过（交付边界＝结构可读）；B5 Atlas Reader + Mapper 完成、32 项测试、全语料 region 未命中 0；**B6 已于 2026-10-22 复核通过**（阶段 B 收尾）**。报告见 `docs/skeleton/B1_REPORT.md`、`B3_REPORT.md`、`task4_B4.md`、`B5_REPORT.md`、`B6_REPORT.md` |
 | `docs/skeleton/canonical-visual-data-types.md` | Canonical 视觉类型与功能导向建模：TextureAsset、AtlasPage、AtlasRegion、Attachment、Mesh/UV、绑定/蒙皮分层候选 | **B0 类型边界与首批功能对照表复核通过（§6 / §7.0）**；首片仅 Atlas + PNG，不读骨架；绑定等后续能力需先完成跨格式证据分析 |
 | `docs/format/native-project-v2-skeleton.md` | 原生格式 v2（Skeleton 增量）Schema 冻结稿：完整 JSON 示例、字段必需性/默认值、枚举字符串、ID 规则、未知字段锚点、required capability、迁移与错误码、资源落地策略、诊断等级 | Task 4 阶段 B **B0 复核通过**；不改写已审阅的 v1 RFC |
+| `docs/skeleton/mesh-and-constraint-rfc.md` | **Task 5 A2**：第二批附件与约束 canonical 模型提案（mesh / weightedMesh / linkedMesh / boundingbox 占位 / IK / transform；含顶点空间证据与 golden 计划、TBD-A…TBD-F） | **阶段 A 提案，待负责人审阅**；实现归阶段 B |
+| `docs/format/native-project-v3-mesh.md` | **Task 5 A3**：原生格式 v3 Schema 提案（v2 + 第二批骨架类型增量；`formatVersion = 3`、迁移链 v1→v2→v3、不引入新 capability，D29） | **阶段 A 提案，待负责人审阅**；不改写 v2 冻结稿 |
+| `Agent_Task/Task5.md` | Task 5 第二批静态数据建模与导入规格（含 A1 取证报告、复核记录、A2/A3 提案指针） | **阶段 A 六项全部完成并验收通过（2026-10-22，见 `Agent_Task/Task5_A6_Acceptance.md`）**；阶段 B 待批准 |
+| `Agent_Task/Task5_Implementation_Plan.md` | **Task 5 阶段 B 方案**：B1 Domain 第二批类型 → B2 原生格式 v3（三读一写）→ B3 Reader/Mapper → B4 插件诊断 → B5 语料闭环 | **提案，待负责人批准**；开工前置 R1＝B6 遗留改动须先建基线提交 |
+| `Agent_Task/Task5_A6_Acceptance.md` | Task 5 阶段 A 验收记录（交付物、停点纪律、一致性 5 项、未决项、阶段 B 开工前置） | **阶段 A 验收通过** |
+| `Agent_Task/Task6.md` | Task 6 共享图集布局（B6 已知缺口，2 个单位）独立规格 | 待负责人裁定 Q6-1…Q6-3 |
 | `tools/skeleton-probe/` | Spine 3.2.01 骨架契约只读探针 + 合成 fixture 生成器（登记见 §2.4） | Task 4 阶段 A 已交付 |
 | `docs/scene-system/` | 独立场景系统基础模型设计及后续实现规格 | 基础设计已记录；实现待排期 |
 | `Agent_Task/Task1.md` | Task 1 核心数据模型任务与现行场景层级契约 | 原任务完成；其中父级限制由新契约取代，Task 2 更新实现 |
@@ -40,8 +46,8 @@
 | `Agent_Task/Task2_Back_task.md` | Task 2 Scene/root、Atlas 校验与 Sprite API 返修规格 | **已返修并验收** |
 | `Agent_Task/Task3.md` | 原生项目格式 Schema v1 与 JSON Codec 执行规格 | **阶段 A 已审阅；RFC v1.2 复审通过，阶段 B 已获准启动** |
 | `Agent_Task/Task3_Back_task.md` | Task 3 超范围数值长度上限与固定重试次数边界返修规格 | **已返修并复核通过** |
-| `Agent_Task/Task4.md` | Spine 3.2.0.1 导入插件、宿主 API 与骨架数据契约 | **阶段 A 与 B0 复核通过；B1–B5 已核验通过；B4 Reader 全语料 1113/1113 通过（结构可读）；B6 实现与验证完成、待复核** |
-| `Agent_Task/Task4_Implementation_Plan.md` | Task 4 阶段 B 方案（B0 数据类型/Schema/资源策略冻结；后续 Atlas+PNG、Skeleton/Codec/Reader/Mapper/宿主事务） | **B0 复核通过；B1/B2/B3 已实现；B4 Reader 全语料 1113/1113 通过（结构可读）；B5 Atlas Reader + Mapper 已实现；B6 实现与验证完成、待复核** |
+| `Agent_Task/Task4.md` | Spine 3.2.0.1 导入插件、宿主 API 与骨架数据契约 | **阶段 A 与 B0 复核通过；B1–B5 已核验通过；B4 Reader 全语料 1113/1113 通过（结构可读）；**B6 已于 2026-10-22 复核通过**（阶段 B 收尾）** |
+| `Agent_Task/Task4_Implementation_Plan.md` | Task 4 阶段 B 方案（B0 数据类型/Schema/资源策略冻结；后续 Atlas+PNG、Skeleton/Codec/Reader/Mapper/宿主事务） | **B0 复核通过；B1/B2/B3 已实现；B4 Reader 全语料 1113/1113 通过（结构可读）；B5 Atlas Reader + Mapper 已实现；**B6 已于 2026-10-22 复核通过**（阶段 B 收尾）** |
 | `Agent_Task/Task4_Back_task.md` | Task 4 阶段 A 文档契约复核返修规格 | **复核通过，已关闭** |
 | `Agent_Task/Back_task.md` | Task 1 父级类型约束历史退回记录 | **已被现行可挂载规则取代** |
 | `tools/` | 开发验证工具（核心测试、语料扫描器、格式探针等） | Phase 0/Phase 1 工具 |
@@ -135,13 +141,13 @@ node tools/corpus-scan/select-samples.mjs    # 产出 sample-selection.md、out/
 | | |
 |---|---|
 | 相对路径 | `tools/skeleton-probe/` |
-| 用途 | 为骨架 Domain/插件宿主 RFC 提供**可复现的数值证据**：版本/三件套、对象计数、引用闭合、名称唯一性、附件 `path` 语义、图集形态（rotate/trim/pma/format）、附件→region 查找率、图集页坐标空间像素判据；并生成**合成 fixture**（不含游戏资产） |
+| 用途 | 为骨架 Domain/插件宿主 RFC 提供**可复现的数值证据**：版本/三件套、对象计数、引用闭合、名称唯一性、附件 `path` 语义、图集形态（rotate/trim/pma/format）、附件→region 查找率、图集页坐标空间像素判据；**Task 5 A1 第二批静态数据取证**（加权顶点骨骼数/权重和/索引越界、顶点空间判据、`hull`/`edges` 出现率、boundingbox 0 例、LinkedMesh 逐条、IK / transform 取值域）；并生成**合成 fixture**（不含游戏资产） |
 | 适用场景 | Task 4 阶段 A 的证据产出；阶段 B 用其中的合成 fixture 做导入插件回归 |
 | 使用说明 | [`tools/skeleton-probe/README.md`](tools/skeleton-probe/README.md) |
-| 运行入口 | `node tools/skeleton-probe/probe.mjs <语料根> -o tools/skeleton-probe/out`；`node tools/skeleton-probe/png-page-probe.mjs <语料根> --limit 24`；`node tools/skeleton-probe/make-fixture.mjs --verify`；`node tools/skeleton-probe/emit-samples.mjs`（样本 manifest 数据表）；`node tools/skeleton-probe/vert-probe.mjs <相对路径> <起始偏移> <顶点数> <目标结束偏移>`（在给定偏移上试各种顶点区布局，看哪种正好落在目标结束偏移） |
+| 运行入口 | `node tools/skeleton-probe/probe.mjs <语料根> -o tools/skeleton-probe/out`；`node tools/skeleton-probe/png-page-probe.mjs <语料根> --limit 24`；`node tools/skeleton-probe/make-fixture.mjs --verify`；`node tools/skeleton-probe/emit-samples.mjs`（样本 manifest 数据表）；`node tools/skeleton-probe/vert-probe.mjs <相对路径> <起始偏移> <顶点数> <目标结束偏移>`（在给定偏移上试各种顶点区布局，看哪种正好落在目标结束偏移）；`node tools/skeleton-probe/mesh-constraint-probe.mjs <语料根> -o tools/skeleton-probe/out`（Task 5 A1 第二批数据取证，Full/Primary 双口径）；`node tools/skeleton-probe/tc1-space-control.mjs <语料根>`（Task 5 A1 顶点空间判据的**对照实验**，用已知答案样本自检判据）；`node tools/skeleton-probe/type-byte-census.mjs <语料根> -o tools/skeleton-probe/out`（Task 5 A1 **TBD-F**：附件类型字节直接普查，不复用旧 Reader，按 `binary_reader.cpp` 已验证布局独立走字节）；`node tools/skeleton-probe/weight-sum-census.mjs <语料根>`（Task 5 A5 **D37**：加权顶点权重和分布普查 —— `sum=0` / `sum<0` / 非有限 / 离差计数与 min/max） |
 | `vert-probe.mjs` | 走查专用：语料根**不写死在源码里**，由 `$LOONGBONES_CORPUS_ROOT` 提供（规范 §8.2）；缺参即退出码 2 |
 | 输入 | 语料根目录（**只读**），由 `$LOONGBONES_CORPUS_ROOT` 或首参数提供；fixture 模式输入 `docs/skeleton/fixtures/` |
-| 输出 | `tools/skeleton-probe/out/`（生成目录，可删可重建）；`docs/skeleton/fixtures/`（**入库**的合成 fixture） |
+| 输出 | `tools/skeleton-probe/out/`（生成目录，可删可重建；含 `mesh-constraint-probe.json/.md`、`type-byte-census.md`；权重和普查只打印到 stdout）；`docs/skeleton/fixtures/`（**入库**的合成 fixture，**16 个**：5 个首批 Task 4 + 11 个第二批 Task 5 A5 —— 最小 mesh(nonessential=1) / 最小 mesh(nonessential=0，语料主流) / 加权含负权重 / linked 类型4 / linked 类型5（语料同构）/ 三角索引越界 / 骨骼下标越界 / 权重和=0 / 权重和<0 / 约束 mix=1 / 约束 mix=0） |
 | 依赖 | Node.js v22+；旧项目 Reader `converter/src/read/binary32.ts`、`converter/src/model.ts`、`converter/src/atlas.ts`（**分析工具借用，非产品代码**）；零第三方库 |
 | 可安全重跑 | 是（按路径排序 + 纯聚合，输出确定） |
 | 纪律 | 只读语料；输出只含相对路径 + hash + 计数，**不写绝对路径、不复制/落地任何游戏资产** |
@@ -278,6 +284,8 @@ node tools/corpus-scan/select-samples.mjs    # 产出 sample-selection.md、out/
 | [`docs/mapping-spine32-to-native.md`](docs/mapping-spine32-to-native.md) | Spine 3.2.01 → Native Model 字段/语义映射与不确定项（2026-10-20 已补证据修订） |
 | [`docs/skeleton/`](docs/skeleton/) | **Task 4 骨架模块设计**：Skeleton Domain 与原生格式兼容提案、插件宿主契约、字段映射表、样本 manifest、合成 fixture、阶段 A 验收报告（含返修记录）、B0 验收报告、B4 Reader 报告 |
 | [`docs/format/native-project-v2-skeleton.md`](docs/format/native-project-v2-skeleton.md) | 原生格式 v2（Skeleton 增量）Schema 冻结稿 |
+| [`docs/format/native-project-v3-mesh.md`](docs/format/native-project-v3-mesh.md) | 原生格式 v3（第二批骨架类型增量）Schema **提案**（Task 5 A3，待审阅） |
+| [`docs/skeleton/mesh-and-constraint-rfc.md`](docs/skeleton/mesh-and-constraint-rfc.md) | 第二批附件与约束 canonical 模型**提案**（Task 5 A2，待审阅） |
 | [`Agent_Task/Task4.md`](Agent_Task/Task4.md) | Task 4 Spine 导入插件、宿主 API 与骨架数据契约执行规格 |
 | [`Agent_Task/Task4_Back_task.md`](Agent_Task/Task4_Back_task.md) | Task 4 阶段 A 文档契约复核返修规格（已复核通过并关闭） |
 | [`docs/adr/`](docs/adr/) | ADR/RFC 草案（Phase 1 待签定） |

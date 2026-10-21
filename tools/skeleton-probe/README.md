@@ -12,6 +12,10 @@
 | `png-page-probe.mjs` | 用像素判据判定「图集页坐标空间」（页声明 size vs PNG 实际尺寸） |
 | `make-fixture.mjs` | 生成**合成** fixture（不含任何游戏资产），并可选回读自校验 |
 | `emit-samples.mjs` | 从 `probe.mjs` 的 JSON 输出中摘录 16 个样本，打印 `docs/skeleton/sample-manifest.md` 用的数据表 |
+| `tc1-space-control.mjs` | **Task 5 A1 判据对照实验**：用已知答案的样本（多骨骼顶点自洽性、region.x/y、同 slot 的 region↔mesh）检验「顶点空间判据」本身是否成立；判据无效时会直接暴露 |
+| `type-byte-census.mjs` | **Task 5 A1（TBD-F）**：附件**类型字节**直接普查。不复用旧 TS Reader，按 `binary_reader.cpp`（B4 已验证布局）独立走字节，给出 0…5 各类型的 Full/Primary 计数与 linked 附件的父引用解析；自带与 A1 已知计数的交叉核对表 |
+| `mesh-constraint-probe.mjs` | **Task 5 A1**：第二批静态数据取证 —— 加权顶点（骨骼数/权重和/索引越界）、顶点空间判据、`hull`/`edges` 出现率、boundingbox 0 例复核、LinkedMesh 逐条、IK / transform 约束取值域（Full 与 Primary 双口径） |
+| `weight-sum-census.mjs` | **Task 5 A5（D37 证据）**：加权顶点**权重和**分布普查 —— `sum = 0` / `sum < 0` / 非有限 / `|sum−1| > tol` 的计数与 min/max，以及单条负权重绑定数。用于判定 D37 的拒绝路径在真实语料里**有没有触发样本** |
 
 `probe.mjs` 逐文件记录：相对路径、**SHA-256**、体积、版本、`nonessential`/`imagesPath`、
 骨骼/插槽/皮肤/动画/时间线/约束/事件计数、附件按类型计数、**引用闭合**（骨骼父索引、
@@ -48,6 +52,18 @@ node tools/skeleton-probe/png-page-probe.mjs "<语料根目录>" --limit 24
 
 # 生成合成 fixture 并回读自校验
 node tools/skeleton-probe/make-fixture.mjs --verify
+
+# Task 5 A1：第二批静态数据（mesh / 蒙皮 / 约束）取证
+node tools/skeleton-probe/mesh-constraint-probe.mjs "<语料根目录>" -o tools/skeleton-probe/out
+
+# Task 5 A1：顶点空间判据的对照实验（判据自检，必须和取证一起跑）
+node tools/skeleton-probe/tc1-space-control.mjs "<语料根目录>"
+
+# Task 5 A1（TBD-F）：附件类型字节直接普查（不依赖旧 Reader 的继承回退）
+node tools/skeleton-probe/type-byte-census.mjs "<语料根目录>" -o tools/skeleton-probe/out
+
+# Task 5 A5（D37）：加权顶点权重和分布普查（约 2 s）
+node tools/skeleton-probe/weight-sum-census.mjs "<语料根目录>"
 ```
 
 ## 输入 / 输出
@@ -58,6 +74,8 @@ node tools/skeleton-probe/make-fixture.mjs --verify
 | 输出 | `out/skeleton-probe-report.json` — 机器可读全量结果 |
 | | `out/skeleton-probe-report.md` — 人读摘要 |
 | | `out/atlas-page-space-verdict.json` — 页坐标空间判定明细 |
+| | `out/mesh-constraint-probe.json` / `.md` — Task 5 A1 第二批数据取证结果 |
+| | `out/type-byte-census.md` — Task 5 A1（TBD-F）附件类型字节普查与交叉核对 |
 | | `docs/skeleton/fixtures/*` — 合成 fixture（由 `make-fixture.mjs` 生成） |
 
 `out/` 是生成目录，可随时删除后按上文命令重建；不要手工编辑。

@@ -39,6 +39,16 @@
 | D26 | 首个 Spine 导入插件采用**编译期静态注册**和抽象插件接口；不承诺动态库 ABI、运行时安装或崩溃隔离。Qt 编译器/ABI 定案后可另立决策改加载器 | `docs/skeleton/plugin-host-rfc.md`；[Task 4 Back Task](Agent_Task/Task4_Back_task.md) | 2026-10-20 |
 | D27 | Task 4 只把 Skeleton 作为 Project 级资产导入，不放入 Scene。未来场景实例必须用独立的骨架实例节点/类型引用 Skeleton 资产；不得把 Bone 映射为 Scene Node，也不得伪装成普通 Sprite | `docs/skeleton/skeleton-domain-rfc.md`；[Task 4 Back Task](Agent_Task/Task4_Back_task.md) | 2026-10-20 |
 | D28 | 不提供插件版本迁移钩子。插件版本用于来源记录与诊断；插件升级不自动改写已有 canonical 数据。重导/更新若实现，必须是用户显式操作并遵守稳定 ID 映射 | `docs/skeleton/plugin-host-rfc.md`；[Task 4 Back Task](Agent_Task/Task4_Back_task.md) | 2026-10-20 |
+| D29 | 骨架第二批（mesh / 加权 mesh / linked mesh / IK / transform 约束）采用**直接增量修改结构 + 升 `formatVersion = 3`**，**不做 capability 协商层**。理由：能力门控只让旧 Reader「优雅报错」，并未解决「结构更新后解析器读不了」这一核心困境；当前无已发布存量工程与不可修改部件，大改现在可行。旧 v1 / v2 Reader 遇 v3 固定返回 `FORMAT_VERSION_UNSUPPORTED`；迁移链 v1→v2→v3 均为纯函数，写出统一为 v3 | [Task 5](Agent_Task/Task5.md) §3 A3、§9.1（Q5-1） | 2026-10-22 |
+| D30 | 加权 mesh 的**权重保留源原值**，导入期只校验权重和合法（`sum = 0` / NaN / 越界即拒绝），**归一化由求值侧负责**。不得在导入期改写源语义 | [Task 5](Agent_Task/Task5.md) §9.2（Q5-2） | 2026-10-22 |
+| D31 | `hull` / `edges` **不落 canonical**。决定性理由：本项目使用**独立 runtime**，且**不提供回写 / 回填 Spine 的方案**，因此无需为回写保真保留字段（也不必为可能不存在的回写能力预先实现 runtime 保真） | [Task 5](Agent_Task/Task5.md) §9.3（Q5-3） | 2026-10-22 |
+| D32 | BoundingBox（语料 **0 例**）**保留类型占位，但不实现**：canonical / schema 保留类型位置与诊断码，不做解析、映射、校验与导入；支持矩阵写「不支持 + 待验证」，不得写「已验证支持」。有真实语料或功能需求时再实现 | [Task 5](Agent_Task/Task5.md) §9.4（Q5-4） | 2026-10-22 |
+| D33 | 共享图集布局（`h0164s5/watch/` 下 2 个单位共用与目录同名的 `.atlas.txt` → `IMPORT_RESOURCE_MISSING`）**不并入 Task 5**，另立 **`Agent_Task/Task6.md`**（给 `IResourceResolver` 增加目录列举能力） | [Task 5](Agent_Task/Task5.md) §9.5（Q5-5)；[Task 6](Agent_Task/Task6.md) | 2026-10-22 |
+| D34 | 加权 mesh 的**单条负权重合法**，语义＝**该绑定对顶点无影响**；不拒绝、不诊断，原值保留（语料 86 例；fixture `07-weighted-mesh`）。**权重和的判据见 D37**（此处原写「和不含负值」已被 D37 收紧） | [Task 5 A1 裁定结果](Agent_Task/Task5_A1_Report.md) §5；[模型提案](docs/skeleton/mesh-and-constraint-rfc.md) §5 | 2026-10-22 |
+| D35 | IK 约束除保留 `mix` 原值外，**新增布尔 `enabled`（`mix != 0`）记录是否开启**。理由：语料 `mix` 只有 0（302）与 1（2405），无任何中间值 | [Task 5 A1 裁定结果](Agent_Task/Task5_A1_Report.md) §5；[模型提案](docs/skeleton/mesh-and-constraint-rfc.md) §8 | 2026-10-22 |
+| D36 | Transform 约束的 4 个 mix 与 6 个 offset **只保留源原值、不解释语义**（自洽方案）。理由：语料 mix 越出 [0,1]（`rotateMix` −180…142.6）且**从未取到 1**，与 Spine 3.5+ 的「0…1 插值因子」语义相悖，无证据不得解释。**求值器在 V3（动画时基）取证完成前不得读取这些字段做计算** | [Task 5 A1 裁定结果](Agent_Task/Task5_A1_Report.md) §5；[模型提案](docs/skeleton/mesh-and-constraint-rfc.md) §9 | 2026-10-22 |
+| D37 | 加权 mesh 的**权重和必须有限且 > 0**：`sum = 0`、或 `sum < 0`、或 NaN / ±Inf 均判 `MESH_WEIGHT_SUM_INVALID` 并**拒绝该候选**。判据是**权重和**，不是单条绑定的符号 —— 单条负权重只要和仍 > 0 就合法（D34）。理由（负责人 2026-10-22）：「非法权重和为 0 即可，小于零也没有意义」。**不做**归一化、不把 0 当"均匀分摊" | [Task 5 A5 复核](Agent_Task/Task5_A5_Review.md)；[模型提案](docs/skeleton/mesh-and-constraint-rfc.md) §11；fixture `12-mesh-bad-weight-sum-zero` / `13-mesh-bad-weight-sum-negative` | 2026-10-22 |
+| D38 | 合成 fixture **尽量对齐语料主流形态**，且**解析器**两条路径都要支持：① LinkedMesh —— 类型 4（父为非加权 mesh + 显式 `parentSkin`，**语料 0 例**，fixture `08`）+ 类型 5（父为加权 mesh + `parentSkin = null`，**语料 2 例**，fixture `14`）；② mesh 的 `nonessential` —— `=1` 仅 4/1113（fixture `06`）+ `=0` 占 1109/1113（fixture `16`）。理由（负责人 2026-10-22）：「最好对齐，不过不对齐也没问题，**解析器需要对齐**，我们用的（原生）格式没关系」⇒ 对齐是**解析器**的义务，canonical / 原生格式不受影响 | [Task 5 A5 复核](Agent_Task/Task5_A5_Review.md) §8；[fixtures README](docs/skeleton/fixtures/README.md) §1 | 2026-10-22 |
 
 ---
 
@@ -62,7 +72,7 @@
 | # | 事项 | 已确认的结论（进入对应模块时直接采用） |
 |---|---|---|
 | N1 | 骨骼动画帧值域 | Spine 骨骼帧是**相对 setup 的增量**，非绝对值（照绝对值减 setup 会让 `mecha/idle/root` 差 90°） |
-| N2 | 非加权 mesh 顶点空间 | Spine 是**槽骨骼局部坐标**（DragonBones 是骨架空间绝对坐标；弄错会"动画一播就散"） |
+| N2 | 非加权 mesh 顶点空间 | Spine 是**槽骨骼局部坐标**（DragonBones 是骨架空间绝对坐标；弄错会"动画一播就散"）。**2026-10-22 Task 5 A1 对照实验支持该结论**：加权顶点每条 `(bone, x, y)` 是**对应骨骼的局部坐标**（各条目变换到骨架空间后重合，mean 5.5 vs 原始 122.1）；中途曾因判据无效被误判为「骨架空间」，已撤回，见 `Agent_Task/Task5_A1_Review.md` §3 P1 |
 | N3 | mesh UV 的空间 | Spine 文件里的 `uvs` 就是 **regionUVs（region 相对 [0,1]）**；整页 UV 由 runtime `UpdateUVs()` 加载时算。当整页坐标再逆变换 = 双重变换，UV 被拉出 [0,1] |
 | N4 | 曲线形态 | 线性 / stepped / 贝塞尔(4 点) 确定；"采样点"形态出现率待统计 |
 

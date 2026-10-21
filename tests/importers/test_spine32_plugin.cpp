@@ -130,6 +130,19 @@ std::string makeAtlas(const std::string& pageFile, const std::string& regionName
   return out;
 }
 
+/// 在页头追加一条属性（如 `filter`）。用于构造「当前 Domain 不承载的页属性」。
+std::string makeAtlasWithPageProperty(const std::string& pageFile, const std::string& regionName,
+                                      int width, int height, const std::string& property) {
+  std::string out = pageFile + "\n";
+  out += "size: " + std::to_string(width) + "," + std::to_string(height) + "\n";
+  out += property + "\n";
+  out += "\n";
+  out += regionName + "\n";
+  out += "  xy: 0,0\n";
+  out += "  size: 10,20\n";
+  return out;
+}
+
 // ---- 最小骨架二进制（1 骨 / 0 ik / 0 transform / 1 槽 / 1 附件）----
 void writeHeader(W& w, bool nonessential, const std::string& version = "3.2.01") {
   w.str("h");
@@ -248,6 +261,22 @@ std::size_t countSeverity(const api::ImportReport& report, api::ImportSeverity s
     if (d.severity == severity) ++n;
   }
   return n;
+}
+
+std::size_t countCode(const api::ImportReport& report, api::ImportCode code) {
+  std::size_t n = 0;
+  for (const api::ImportDiagnostic& d : report.diagnostics) {
+    if (d.code == code) ++n;
+  }
+  return n;
+}
+
+/// 「不得静默丢失」的账本：某种不支持能力被计了多少次。
+std::size_t unsupportedCount(const api::ImportReport& report, const std::string& name) {
+  for (const auto& entry : report.unsupported) {
+    if (entry.first == name) return entry.second;
+  }
+  return 0;
 }
 
 api::ImportDescriptor spine32Descriptor() {
@@ -388,6 +417,36 @@ TEST(Spine32Plugin, UnresolvedRegionIsAnError) {
       prepareUnit(minimalSkeleton("nope"), makeAtlas("unit.png", "m", 64, 64), true, ids);
   CHECK(!draft.valid);
   CHECK(hasCode(draft.report.diagnostics, api::ImportCode::kUnresolvedReference));
+  CHECK(draft.report.errorCount() >= 1);
+}
+
+// 「页属性不进 Domain」是**能力缺口**（warning），不是解析失败（error）。
+// 曾因 AtlasTextCode → ImportCode 一律映射成 kParseError，语料里 3333 条
+// 页属性告警被计成解析错误（B6 复核发现项，2026-10-21）。
+TEST(Spine32Plugin, UnsupportedAtlasPagePropertyIsWarningNotParseError) {
+  spine32::RandomIdFactory ids;
+  const auto draft = prepareUnit(minimalSkeleton("m"),
+                                 makeAtlasWithPageProperty("unit.png", "m", 64, 64,
+                                                           "filter: Linear,Linear"),
+                                 true, ids);
+  CHECK(draft.valid);
+  CHECK_EQ(countCode(draft.report, api::ImportCode::kUnsupportedCapability), std::size_t{1});
+  CHECK_EQ(countCode(draft.report, api::ImportCode::kParseError), std::size_t{0});
+  CHECK_EQ(draft.report.errorCount(), std::size_t{0});
+  CHECK_EQ(countSeverity(draft.report, api::ImportSeverity::kWarning), std::size_t{1});
+  // 降级为 warning 不等于消失：能力缺口仍必须进 unsupported 账本。
+  CHECK_EQ(unsupportedCount(draft.report, "atlasPageProperties"), std::size_t{1});
+}
+
+// 反向守护：真正的图集**结构性**失败仍必须是 kParseError + error，
+// 不能因为上面的修正被一并放宽成 warning。
+TEST(Spine32Plugin, AtlasSyntaxErrorRemainsParseError) {
+  spine32::RandomIdFactory ids;
+  const std::string atlas = "unit.png\nsize: not,a-number\n\nm\n  xy: 0,0\n  size: 10,20\n";
+  const auto draft = prepareUnit(minimalSkeleton("m"), atlas, true, ids);
+  CHECK(!draft.valid);
+  CHECK_EQ(countCode(draft.report, api::ImportCode::kParseError), std::size_t{1});
+  CHECK_EQ(countCode(draft.report, api::ImportCode::kUnsupportedCapability), std::size_t{0});
   CHECK(draft.report.errorCount() >= 1);
 }
 

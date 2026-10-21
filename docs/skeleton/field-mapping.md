@@ -237,12 +237,20 @@ skin: slotCount
 
 | 能力 | 源字段 | 语料实测 | 去向 |
 |---|---|---|---|
-| Mesh 附件（静态参数） | `uvs` / `triangles` / `vertices` / `hull` / `edges` | mesh 2981（Full） | 后续任务 |
-| 加权 mesh | `weights` / `bones` | 17271（Full） | 后续任务 |
-| Linked mesh | `parent` / `skin` / `inheritDeform` | 2（Full） | 后续任务 |
-| IK 约束参数 | `name` / `boneIndices[]` / `targetIndex` / `mix` / `bendPositive` | 2707（Full） | 后续任务 |
-| Transform 约束参数 | 见 §3.2 全列 | 208（Full） | 后续任务 |
-| Path 约束 | — | 0 | 后续任务 |
+> **2026-10-22 更新（Task 5 第二批）**：下列 mesh / 加权 mesh / linked mesh / IK / transform
+> 已由 Task 5 承接为**第二批实现范围**（模型提案 `docs/skeleton/mesh-and-constraint-rfc.md`、
+> 格式提案 `docs/format/native-project-v3-mesh.md`，**阶段 A 提案，实现归 Task 5 阶段 B**）。
+> 逐字段的**证据来源 → 转换规则 → golden 值计划**见模型提案；本文 §11.3 的"不支持"范围**不变**
+> （动画 / deform / 事件 / path / clipping / boundingbox 仍不支持）。
+
+| 能力 | 源字段 | 语料实测 | 去向 |
+|---|---|---|---|
+| Mesh 附件（静态参数） | `uvs` / `triangles` / `vertices`（`hull` / `edges` **不落**，D31） | mesh **2,979**（Full；B4 旧口径 2,981 = 2,979 + linked 2，**linked 已单列下一行，此处不再计入**） | **Task 5 第二批** |
+| 加权 mesh | `weights` / `bones` | 17271（Full）；加权顶点 312,083 | **Task 5 第二批**（负权重合法，D34） |
+| Linked mesh | `parent` / `skin` / `inheritDeform` | 2（Full） | **Task 5 第二批**（引用父，不复制几何） |
+| IK 约束参数 | `name` / `boneIndices[]` / `targetIndex` / `mix` / `bendPositive` | 2707（Full） | **Task 5 第二批**（新增 `enabled` 布尔，D35） |
+| Transform 约束参数 | 见 §3.2 全列 | 208（Full） | **Task 5 第二批**（原值承载、不解释语义，D36） |
+| Path 约束 | — | 0 | 后续任务（语料 0 例，无样本） |
 
 ### 11.3 不支持且有诊断（本任务不实现，导入时告知）
 

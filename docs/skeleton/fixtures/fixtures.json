@@ -35,6 +35,82 @@
    "files": [
     "05-non-finite-float.skel.bytes"
    ]
+  },
+  {
+   "fixture": "06-minimal-mesh",
+   "files": [
+    "06-minimal-mesh.skel.bytes",
+    "06-minimal-mesh.atlas.txt",
+    "06-minimal-mesh.png"
+   ]
+  },
+  {
+   "fixture": "07-weighted-mesh",
+   "files": [
+    "07-weighted-mesh.skel.bytes",
+    "07-weighted-mesh.atlas.txt",
+    "07-weighted-mesh.png"
+   ]
+  },
+  {
+   "fixture": "08-linked-mesh",
+   "files": [
+    "08-linked-mesh.skel.bytes",
+    "08-linked-mesh.atlas.txt",
+    "08-linked-mesh.png"
+   ]
+  },
+  {
+   "fixture": "09-mesh-bad-triangle",
+   "files": [
+    "09-mesh-bad-triangle.skel.bytes"
+   ]
+  },
+  {
+   "fixture": "10-mesh-bad-bone-index",
+   "files": [
+    "10-mesh-bad-bone-index.skel.bytes"
+   ]
+  },
+  {
+   "fixture": "11-constraints",
+   "files": [
+    "11-constraints.skel.bytes"
+   ]
+  },
+  {
+   "fixture": "12-mesh-bad-weight-sum-zero",
+   "files": [
+    "12-mesh-bad-weight-sum-zero.skel.bytes"
+   ]
+  },
+  {
+   "fixture": "13-mesh-bad-weight-sum-negative",
+   "files": [
+    "13-mesh-bad-weight-sum-negative.skel.bytes"
+   ]
+  },
+  {
+   "fixture": "14-linked-mesh-implicit-skin",
+   "files": [
+    "14-linked-mesh-implicit-skin.skel.bytes",
+    "14-linked-mesh-implicit-skin.atlas.txt",
+    "14-linked-mesh-implicit-skin.png"
+   ]
+  },
+  {
+   "fixture": "15-ik-mix-zero",
+   "files": [
+    "15-ik-mix-zero.skel.bytes"
+   ]
+  },
+  {
+   "fixture": "16-minimal-mesh-plain",
+   "files": [
+    "16-minimal-mesh-plain.skel.bytes",
+    "16-minimal-mesh-plain.atlas.txt",
+    "16-minimal-mesh-plain.png"
+   ]
   }
  ]
 }

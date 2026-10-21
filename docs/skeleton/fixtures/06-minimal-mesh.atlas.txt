@@ -1,0 +1,13 @@
+06-minimal-mesh.png
+size: 64,64
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+
+mesh-0
+  rotate: false
+  xy: 0, 0
+  size: 32, 32
+  orig: 32, 32
+  offset: 0, 0
+  index: -1

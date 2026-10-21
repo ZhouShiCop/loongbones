@@ -12,6 +12,22 @@
  *   04-truncated             畸形：文件被截断（strictEof **必须失败**）
  *   05-non-finite-float      畸形：骨骼 rotation = NaN（**必须被拒绝**，见 domain-rfc §6.11）
  *
+ * Task 5 A5（第二批静态数据）：
+ *   06-minimal-mesh          最小非加权 mesh（含 hull / edges / width / height，均不落 canonical）
+ *   07-weighted-mesh         加权 mesh，**负权重 -0.2 且和 = 1.0** ⇒ 合法（D34）
+ *   08-linked-mesh           类型 4：父为非加权 mesh + 显式 parentSkin='default'（语料 0 例）
+ *   09-mesh-bad-triangle     畸形：三角索引越界（**必须被拒绝**）
+ *   10-mesh-bad-bone-index   畸形：绑定 boneIndex 越界（**必须被拒绝**）
+ *   11-constraints           IK mix=1（enabled=true）+ transform 10 float 原值透传
+ *
+ * Task 5 A5 复核返修（2026-10-22 补齐三项覆盖缺口）：
+ *   12-mesh-bad-weight-sum-zero      畸形：顶点权重和 = 0（**必须被拒绝**）
+ *   13-mesh-bad-weight-sum-negative  畸形：顶点权重和 < 0（**必须被拒绝**）
+ *   14-linked-mesh-implicit-skin     类型 5：父为加权 mesh + parentSkin=null（**语料 2 例形态**）
+ *   15-ik-mix-zero           IK mix=0 ⇒ enabled=false（D35 的 false 分支，语料 302 例）
+ *   16-minimal-mesh-plain    `nonessential = 0` 的 mesh（**语料 1109 / 1113 的形态**）：
+ *                            无 edges / width / height、骨骼末尾无颜色；06 的补集
+ *
  * 布局依据（只读参照，不是产品代码）：converter/src/read/binary32.ts 与 binary.ts。
  * 本生成器按该布局**独立写出**字节，不调用旧项目写入器，也不用任何游戏文件做模板。
  *
@@ -91,13 +107,74 @@ function writeRegion(w, a) {
   w.color(WHITE);
 }
 
-/** 一个 skin：slotCount + 每槽 (slotIndex, attCount, 附件…) */
-function writeSkin(w, entries) {
+/**
+ * mesh(2) / weightedmesh(3)。
+ * 字节序（严格对应 binary32.ts 的 readAttachment32）：
+ *   key, name(null 回退), type, path, color, n(varint), uv(2n float),
+ *   triangles(short 数组), vertices, hull(varint)；nonessential 时再写 edges(short 数组) + w + h。
+ * 加权顶点 = 每顶点 boneCount(**float**) + n × [boneIndex(float), x, y, w]（N1：不是 varint）。
+ */
+function writeMesh(w, a, nonessential) {
+  const n = a.bindings ? a.bindings.length : a.vertices.length / 2;
+  w.str(a.name);
+  w.str(a.attachmentName ?? null);
+  w.u8(a.bindings ? 3 : 2);
+  w.str(a.path ?? null);
+  w.color(WHITE);
+  w.varint(n);
+  for (const uv of a.uvs) w.f32(uv);
+  w.varint(a.triangles.length);
+  for (const t of a.triangles) w.i16(t);
+  if (a.bindings) {
+    for (const binds of a.bindings) {
+      w.f32(binds.length);
+      for (const b of binds) { w.f32(b.boneIndex); w.f32(b.x); w.f32(b.y); w.f32(b.weight); }
+    }
+  } else {
+    for (const v of a.vertices) w.f32(v);
+  }
+  w.varint(a.hull ?? n);
+  if (nonessential) {
+    const edges = a.edges ?? [];
+    w.varint(edges.length);
+    for (const e of edges) w.i16(e);
+    w.f32(a.width ?? 0);
+    w.f32(a.height ?? 0);
+  }
+}
+
+/**
+ * linkedmesh(4) / weightedlinkedmesh(5)：几何不落，只写引用。
+ *   key, name, type, path, color, parentSkin, parent, inheritFFD(bool)；nonessential 时 + w + h。
+ *
+ * `parentSkin`：显式给 `null` 表示「父附件在同皮肤内」（**语料 2 例正是此形态**）；
+ * 未给该字段时才回退到 `'default'`。注意这里**不能**用 `??` 判空 —— 那会把显式的
+ * `null` 也吞成 `'default'`，导致两条解析路径在 fixture 里永远覆盖不到。
+ */
+function writeLinkedMesh(w, a, nonessential) {
+  w.str(a.name);
+  w.str(a.attachmentName ?? null);
+  w.u8(a.weighted ? 5 : 4);
+  w.str(a.path ?? null);
+  w.color(WHITE);
+  const parentSkin = Object.prototype.hasOwnProperty.call(a, 'parentSkin') ? a.parentSkin : 'default';
+  w.str(parentSkin);
+  w.str(a.parent);
+  w.bool(a.inheritDeform ?? false);
+  if (nonessential) { w.f32(a.width ?? 0); w.f32(a.height ?? 0); }
+}
+
+/** 一个 skin：slotCount + 每槽 (slotIndex, attCount, 附件…)；按附件 type 分派。 */
+function writeSkin(w, entries, nonessential) {
   w.varint(entries.length);
   for (const e of entries) {
     w.varint(e.slotIndex);
     w.varint(e.attachments.length);
-    for (const a of e.attachments) writeRegion(w, a);
+    for (const a of e.attachments) {
+      if (a.type === 'mesh') writeMesh(w, a, nonessential);
+      else if (a.type === 'linkedMesh') writeLinkedMesh(w, a, nonessential);
+      else writeRegion(w, a);
+    }
   }
 }
 
@@ -108,7 +185,7 @@ function writeSkin(w, entries) {
  * @param slots [{name, boneIndex, attachment, blend}]
  */
 function buildSkeleton({ hash = KEY, version = VERSION, width = 100, height = 100, nonessential = false,
-                         bones, slots, skinEntries }) {
+                         bones, slots, skinEntries, ik = [], transform = [] }) {
   const w = new W();
   w.str(hash);
   w.str(version);
@@ -129,10 +206,32 @@ function buildSkeleton({ hash = KEY, version = VERSION, width = 100, height = 10
     w.f32(b.length ?? 0);
     w.bool(b.inheritScale ?? true);
     w.bool(b.inheritRotation ?? true);
+    // nonessential 时骨骼末尾还有 4 字节颜色（binary32.ts:133 读掉但不消费）
+    if (nonessential) w.color(b.color ?? WHITE);
   }
 
-  w.varint(0); // ik
-  w.varint(0); // transform
+  // ik：name, boneCount(varint), boneIndex…(varint), target(varint), mix(f32), bendPositive(byte)
+  w.varint(ik.length);
+  for (const c of ik) {
+    w.str(c.name);
+    w.varint(c.boneIndices.length);
+    for (const bi of c.boneIndices) w.varint(bi);
+    w.varint(c.targetIndex);
+    w.f32(c.mix ?? 1);
+    w.u8(c.bendPositive === false ? 255 : 1); // readByte() >= 0 ⇒ true
+  }
+
+  // transform：name, boneIndex, target, 4 个 mix + 6 个 offset（全 f32）
+  w.varint(transform.length);
+  for (const c of transform) {
+    w.str(c.name);
+    w.varint(c.boneIndex);
+    w.varint(c.targetIndex);
+    w.f32(c.rotateMix ?? 0); w.f32(c.translateMix ?? 0);
+    w.f32(c.scaleMix ?? 0); w.f32(c.shearMix ?? 0);
+    w.f32(c.offsetRotation ?? 0); w.f32(c.offsetX ?? 0); w.f32(c.offsetY ?? 0);
+    w.f32(c.offsetScaleX ?? 0); w.f32(c.offsetScaleY ?? 0); w.f32(c.offsetShearY ?? 0);
+  }
 
   w.varint(slots.length);
   for (const s of slots) {
@@ -143,7 +242,7 @@ function buildSkeleton({ hash = KEY, version = VERSION, width = 100, height = 10
     w.u8(s.blend ?? 0);
   }
 
-  writeSkin(w, skinEntries);
+  writeSkin(w, skinEntries, nonessential);
   w.varint(0); // 额外 skin 数
   w.varint(0); // events
   w.varint(0); // animations
@@ -212,7 +311,7 @@ function pngBytes(w, h, rgba) {
 }
 
 // ---------------------------------------------------------------------------
-// 4 个 fixture
+// 16 个 fixture：5 个首批（Task 4）+ 11 个第二批（Task 5 A5 的 6 个 + 复核返修补的 5 个）
 // ---------------------------------------------------------------------------
 
 function fixtureMinimal() {
@@ -308,12 +407,289 @@ function fixtureNonFiniteFloat() {
 }
 
 // ---------------------------------------------------------------------------
+// Task 5 A5：第二批 fixture（mesh / 加权 / linked / 约束 / 畸形引用）
+//
+// 全部为**合成**样本，不含任何游戏资产；预期结果登记在
+// `docs/skeleton/fixtures/README.md`，与真实语料的对应关系见
+// `docs/skeleton/mesh-and-constraint-rfc.md` §12。
+//
+// nonessential 一律 true —— 语料 20250 条 mesh 的 width/height 100% 出现（A1 证据 §4），
+// 合成样本保持同一形态，才能覆盖 edges / width / height 的读取分支。
+// ---------------------------------------------------------------------------
+
+function fixtureMinimalMesh() {
+  const skel = buildSkeleton({
+    width: 64, height: 64, nonessential: true,
+    bones: [{ name: 'root', length: 0 }],
+    slots: [{ name: 'slot-mesh', boneIndex: 0, attachment: 'mesh-0' }],
+    skinEntries: [{ slotIndex: 0, attachments: [{
+      type: 'mesh', name: 'mesh-0', path: null,
+      uvs: [0, 0, 1, 0, 0.5, 1],          // regionUVs，0..1
+      vertices: [0, 0, 32, 0, 16, 32],      // 槽骨骼局部坐标（N2）
+      triangles: [0, 1, 2],
+      hull: 3, edges: [0, 1, 1, 2, 2, 0],   // hull / edges 只用于读取覆盖，不落 canonical（D31）
+      width: 32, height: 32,
+    }] }],
+  });
+  return {
+    name: '06-minimal-mesh',
+    files: {
+      '06-minimal-mesh.skel.bytes': skel,
+      '06-minimal-mesh.atlas.txt': Buffer.from(atlasText('06-minimal-mesh.png', 64, 64,
+        [{ name: 'mesh-0', x: 0, y: 0, w: 32, h: 32 }]), 'utf8'),
+      '06-minimal-mesh.png': pngBytes(64, 64, [255, 255, 0, 255]),
+    },
+  };
+}
+
+function fixtureWeightedMesh() {
+  // 3 顶点 × (1~2 绑定)；顶点 0 故意含**负权重**(-0.2) 与 >1 的权重(1.2)：
+  // 权重和为 1.0，负权重按 D34 合法（语义＝该绑定对顶点无影响），导入**不得**拒绝。
+  const skel = buildSkeleton({
+    width: 64, height: 64, nonessential: true,
+    bones: [{ name: 'root', length: 0 }, { name: 'bone-a', parentIndex: 0, y: 10, length: 20 }],
+    slots: [{ name: 'slot-wmesh', boneIndex: 1, attachment: 'wmesh-0' }],
+    skinEntries: [{ slotIndex: 0, attachments: [{
+      type: 'mesh', name: 'wmesh-0', path: null,
+      uvs: [0, 0, 1, 0, 1, 1],
+      bindings: [
+        [{ boneIndex: 1, x: 0, y: 0, weight: 1.2 }, { boneIndex: 0, x: 10, y: 0, weight: -0.2 }],
+        [{ boneIndex: 1, x: 32, y: 0, weight: 1.0 }],
+        [{ boneIndex: 1, x: 32, y: 32, weight: 0.5 }, { boneIndex: 0, x: 0, y: 32, weight: 0.5 }],
+      ],
+      triangles: [0, 1, 2], hull: 3, edges: [], width: 32, height: 32,
+    }] }],
+  });
+  return {
+    name: '07-weighted-mesh',
+    files: {
+      '07-weighted-mesh.skel.bytes': skel,
+      '07-weighted-mesh.atlas.txt': Buffer.from(atlasText('07-weighted-mesh.png', 64, 64,
+        [{ name: 'wmesh-0', x: 0, y: 0, w: 32, h: 32 }]), 'utf8'),
+      '07-weighted-mesh.png': pngBytes(64, 64, [0, 255, 128, 255]),
+    },
+  };
+}
+
+function fixtureLinkedMesh() {
+  // 父 mesh + 两个 linked（inheritDeform true / false 各一）—— 与语料 2 例同构
+  // （b3240c3 的 true、h0164s5 的 false）。子附件**没有**自己的顶点区。
+  const skel = buildSkeleton({
+    width: 64, height: 64, nonessential: true,
+    bones: [{ name: 'root', length: 0 }],
+    slots: [{ name: 'slot-body', boneIndex: 0, attachment: 'body_mesh' }],
+    skinEntries: [{ slotIndex: 0, attachments: [
+      { type: 'mesh', name: 'body_mesh', path: null,
+        uvs: [0, 0, 1, 0, 1, 1], vertices: [0, 0, 32, 0, 32, 32],
+        triangles: [0, 1, 2], hull: 3, edges: [], width: 32, height: 32 },
+      { type: 'linkedMesh', name: 'body_mesh_linked', path: null,
+        parentSkin: 'default', parent: 'body_mesh', inheritDeform: true, width: 32, height: 32 },
+      { type: 'linkedMesh', name: 'body_mesh_linked_noffd', path: null,
+        parentSkin: 'default', parent: 'body_mesh', inheritDeform: false, width: 32, height: 32 },
+    ] }],
+  });
+  return {
+    name: '08-linked-mesh',
+    files: {
+      '08-linked-mesh.skel.bytes': skel,
+      '08-linked-mesh.atlas.txt': Buffer.from(atlasText('08-linked-mesh.png', 64, 64,
+        [{ name: 'body_mesh', x: 0, y: 0, w: 32, h: 32 }]), 'utf8'),
+      '08-linked-mesh.png': pngBytes(64, 64, [128, 0, 255, 255]),
+    },
+  };
+}
+
+function fixtureMeshBadTriangle() {
+  // 3 个顶点，三角索引里出现 9（≥ 顶点数）→ 必须拒绝并报 MESH_TRIANGLE_INDEX_OUT_OF_RANGE
+  const skel = buildSkeleton({
+    width: 32, height: 32, nonessential: true,
+    bones: [{ name: 'root', length: 0 }],
+    slots: [{ name: 'slot-mesh', boneIndex: 0, attachment: 'mesh-bad' }],
+    skinEntries: [{ slotIndex: 0, attachments: [{
+      type: 'mesh', name: 'mesh-bad', path: null,
+      uvs: [0, 0, 1, 0, 0.5, 1], vertices: [0, 0, 32, 0, 16, 32],
+      triangles: [0, 1, 9], hull: 3, edges: [], width: 32, height: 32,
+    }] }],
+  });
+  return { name: '09-mesh-bad-triangle', files: { '09-mesh-bad-triangle.skel.bytes': skel } };
+}
+
+function fixtureMeshBadBoneIndex() {
+  // 加权 mesh 的 boneIndex = 7，但骨架只有 2 根骨骼 → 必须拒绝并报 MESH_WEIGHT_BONE_UNRESOLVED
+  const skel = buildSkeleton({
+    width: 32, height: 32, nonessential: true,
+    bones: [{ name: 'root', length: 0 }, { name: 'bone-a', parentIndex: 0, length: 10 }],
+    slots: [{ name: 'slot-wmesh', boneIndex: 0, attachment: 'wmesh-bad' }],
+    skinEntries: [{ slotIndex: 0, attachments: [{
+      type: 'mesh', name: 'wmesh-bad', path: null,
+      uvs: [0, 0, 1, 0, 1, 1],
+      bindings: [[{ boneIndex: 7, x: 0, y: 0, weight: 1 }],
+                 [{ boneIndex: 1, x: 32, y: 0, weight: 1 }],
+                 [{ boneIndex: 1, x: 32, y: 32, weight: 1 }]],
+      triangles: [0, 1, 2], hull: 3, edges: [], width: 32, height: 32,
+    }] }],
+  });
+  return { name: '10-mesh-bad-bone-index', files: { '10-mesh-bad-bone-index.skel.bytes': skel } };
+}
+
+function fixtureConstraints() {
+  // IK：mix = 1 → enabled = true（D35）；transform：mix/offset 原值透传、不解释语义（D36）
+  const skel = buildSkeleton({
+    width: 32, height: 32, nonessential: true,
+    bones: [{ name: 'root', length: 0 }, { name: 'leg', parentIndex: 0, y: 20, length: 20 }],
+    slots: [{ name: 's', boneIndex: 0, attachment: null }],
+    skinEntries: [{ slotIndex: 0, attachments: [] }],
+    ik: [{ name: 'leg-ik', boneIndices: [1], targetIndex: 0, mix: 1, bendPositive: true }],
+    transform: [{ name: 'copy-tr', boneIndex: 1, targetIndex: 0,
+      rotateMix: 90, translateMix: 0, scaleMix: 0, shearMix: 0,
+      offsetRotation: 0, offsetX: 0, offsetY: 1, offsetScaleX: 0.5, offsetScaleY: 1, offsetShearY: 0 }],
+  });
+  return { name: '11-constraints', files: { '11-constraints.skel.bytes': skel } };
+}
+
+// ---------------------------------------------------------------------------
+// Task 5 A5 复核返修（2026-10-22）：补齐 3 项覆盖缺口
+//   P2 非法权重：权重和 = 0（12）与权重和 < 0（13）—— 负责人裁定「和为 0 即可，
+//      小于零也没有意义」⇒ 判据收紧为 **和必须有限且 > 0**，两者都拒绝。
+//   P3 linked 与语料对齐：语料 2 例是 `parentSkin = null`（父在同皮肤内）+ 父为
+//      加权 mesh（类型字节 5）；08 写的是显式 `'default'` + 父为非加权 mesh（类型 4）。
+//      两条**解析路径不同**，14 补上语料那一侧（解析器两侧都要能处理，原生格式不受影响）。
+//   P4 D35 的 false 分支：`mix = 0` ⇒ `enabled = false`（语料 302 例），此前只有 mix=1。
+// ---------------------------------------------------------------------------
+
+function fixtureMeshBadWeightSumZero() {
+  // 顶点 0 的两条绑定权重都是 0 ⇒ 和 = 0 ⇒ 该顶点不受任何骨骼影响 ⇒ **必须拒绝**
+  // （MESH_WEIGHT_SUM_INVALID）。顶点 1 / 2 正常（和 = 1）—— 拒绝是候选级的，
+  // 所以 golden 只需钉住「顶点 0 的和 = 0」这一条。
+  const skel = buildSkeleton({
+    width: 32, height: 32, nonessential: true,
+    bones: [{ name: 'root', length: 0 }, { name: 'bone-a', parentIndex: 0, y: 10, length: 20 }],
+    slots: [{ name: 'slot-wmesh', boneIndex: 1, attachment: 'wmesh-zero' }],
+    skinEntries: [{ slotIndex: 0, attachments: [{
+      type: 'mesh', name: 'wmesh-zero', path: null,
+      uvs: [0, 0, 1, 0, 1, 1],
+      bindings: [
+        [{ boneIndex: 1, x: 0, y: 0, weight: 0.0 }, { boneIndex: 0, x: 10, y: 0, weight: 0.0 }],
+        [{ boneIndex: 1, x: 32, y: 0, weight: 1.0 }],
+        [{ boneIndex: 1, x: 32, y: 32, weight: 1.0 }],
+      ],
+      triangles: [0, 1, 2], hull: 3, edges: [], width: 32, height: 32,
+    }] }],
+  });
+  return { name: '12-mesh-bad-weight-sum-zero', files: { '12-mesh-bad-weight-sum-zero.skel.bytes': skel } };
+}
+
+function fixtureMeshBadWeightSumNegative() {
+  // 顶点 0 的两条绑定都是负权重（-0.5 / -0.2）⇒ 和 = -0.7 < 0 ⇒ **必须拒绝**
+  // （MESH_WEIGHT_SUM_INVALID）。判据是**权重和**，不是单条绑定的符号：
+  // 单条负权重只要和仍 > 0 就合法（D34，语料 86 例），见 07-weighted-mesh。
+  const skel = buildSkeleton({
+    width: 32, height: 32, nonessential: true,
+    bones: [{ name: 'root', length: 0 }, { name: 'bone-a', parentIndex: 0, y: 10, length: 20 }],
+    slots: [{ name: 'slot-wmesh', boneIndex: 1, attachment: 'wmesh-neg' }],
+    skinEntries: [{ slotIndex: 0, attachments: [{
+      type: 'mesh', name: 'wmesh-neg', path: null,
+      uvs: [0, 0, 1, 0, 1, 1],
+      bindings: [
+        [{ boneIndex: 1, x: 0, y: 0, weight: -0.5 }, { boneIndex: 0, x: 10, y: 0, weight: -0.2 }],
+        [{ boneIndex: 1, x: 32, y: 0, weight: 1.0 }],
+        [{ boneIndex: 1, x: 32, y: 32, weight: 1.0 }],
+      ],
+      triangles: [0, 1, 2], hull: 3, edges: [], width: 32, height: 32,
+    }] }],
+  });
+  return { name: '13-mesh-bad-weight-sum-negative', files: { '13-mesh-bad-weight-sum-negative.skel.bytes': skel } };
+}
+
+function fixtureLinkedMeshImplicitSkin() {
+  // 与语料 2 例**逐字段对齐**：`parentSkin = null`（父在同皮肤内）+ 父是**加权** mesh
+  // ⇒ 类型字节 5（weightedLinkedMesh）；`inheritDeform` true / false 各一。
+  // 08 覆盖的是另一侧（显式 'default' + 非加权父 ⇒ 类型 4），两者都要能解析。
+  const skel = buildSkeleton({
+    width: 64, height: 64, nonessential: true,
+    bones: [{ name: 'root', length: 0 }, { name: 'bone-a', parentIndex: 0, y: 10, length: 20 }],
+    slots: [{ name: 'slot-body', boneIndex: 0, attachment: 'body_wmesh' }],
+    skinEntries: [{ slotIndex: 0, attachments: [
+      { type: 'mesh', name: 'body_wmesh', path: null,
+        uvs: [0, 0, 1, 0, 1, 1],
+        bindings: [
+          [{ boneIndex: 1, x: 0, y: 0, weight: 1.0 }],
+          [{ boneIndex: 1, x: 32, y: 0, weight: 1.0 }],
+          [{ boneIndex: 1, x: 32, y: 32, weight: 1.0 }],
+        ],
+        triangles: [0, 1, 2], hull: 3, edges: [], width: 32, height: 32 },
+      { type: 'linkedMesh', name: 'body_wmesh_linked', path: null,
+        parentSkin: null, parent: 'body_wmesh', weighted: true,
+        inheritDeform: true, width: 32, height: 32 },
+      { type: 'linkedMesh', name: 'body_wmesh_linked_noffd', path: null,
+        parentSkin: null, parent: 'body_wmesh', weighted: true,
+        inheritDeform: false, width: 32, height: 32 },
+    ] }],
+  });
+  return {
+    name: '14-linked-mesh-implicit-skin',
+    files: {
+      '14-linked-mesh-implicit-skin.skel.bytes': skel,
+      '14-linked-mesh-implicit-skin.atlas.txt': Buffer.from(atlasText('14-linked-mesh-implicit-skin.png', 64, 64,
+        [{ name: 'body_wmesh', x: 0, y: 0, w: 32, h: 32 }]), 'utf8'),
+      '14-linked-mesh-implicit-skin.png': pngBytes(64, 64, [255, 128, 0, 255]),
+    },
+  };
+}
+
+function fixtureIkMixZero() {
+  // D35 的 false 分支：`mix = 0` ⇒ `enabled = false`（语料 302 例为此值）。
+  // 11-constraints 只覆盖 mix=1 ⇒ true，此前 false 分支没有任何样本。
+  // `bendPositive = false`：mix=0 的约束不参与求解，该位也一并钉住。
+  const skel = buildSkeleton({
+    width: 32, height: 32, nonessential: true,
+    bones: [{ name: 'root', length: 0 }, { name: 'leg', parentIndex: 0, y: 20, length: 20 }],
+    slots: [{ name: 's', boneIndex: 0, attachment: null }],
+    skinEntries: [{ slotIndex: 0, attachments: [] }],
+    ik: [{ name: 'leg-ik-off', boneIndices: [1], targetIndex: 0, mix: 0, bendPositive: false }],
+  });
+  return { name: '15-ik-mix-zero', files: { '15-ik-mix-zero.skel.bytes': skel } };
+}
+
+function fixtureMinimalMeshPlain() {
+  // 06 走的是 `nonessential = true`（含 edges / width / height），而语料 1113 个单位里
+  // **只有 4 个**是这一形态 —— 占 99%+ 的是 `nonessential = 0`：无 edges、无 width/height、
+  // 骨骼末尾也没有 4 字节颜色。这一形态此前**没有 mesh fixture**（A5 复核 P1 缺口）。
+  // 与「对齐语料」同一条裁定：fixture 尽量对齐语料真实形态，解析器两侧都要能处理。
+  const skel = buildSkeleton({
+    width: 64, height: 64, nonessential: false,
+    bones: [{ name: 'root', length: 0 }],
+    slots: [{ name: 'slot-mesh', boneIndex: 0, attachment: 'mesh-plain' }],
+    skinEntries: [{ slotIndex: 0, attachments: [{
+      type: 'mesh', name: 'mesh-plain', path: null,
+      uvs: [0, 0, 1, 0, 0.5, 1],
+      vertices: [0, 0, 32, 0, 16, 32],
+      triangles: [0, 1, 2], hull: 3,
+    }] }],
+  });
+  return {
+    name: '16-minimal-mesh-plain',
+    files: {
+      '16-minimal-mesh-plain.skel.bytes': skel,
+      '16-minimal-mesh-plain.atlas.txt': Buffer.from(atlasText('16-minimal-mesh-plain.png', 64, 64,
+        [{ name: 'mesh-plain', x: 0, y: 0, w: 32, h: 32 }]), 'utf8'),
+      '16-minimal-mesh-plain.png': pngBytes(64, 64, [0, 200, 200, 255]),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // 写出 + 可选回读自校验
 // ---------------------------------------------------------------------------
 
 fs.mkdirSync(OUT_DIR, { recursive: true });
 const all = [fixtureMinimal(), fixtureNested(), fixtureBadParentIndex(), fixtureTruncated(),
-             fixtureNonFiniteFloat()];
+             fixtureNonFiniteFloat(),
+             fixtureMinimalMesh(), fixtureWeightedMesh(), fixtureLinkedMesh(),
+             fixtureMeshBadTriangle(), fixtureMeshBadBoneIndex(), fixtureConstraints(),
+             fixtureMeshBadWeightSumZero(), fixtureMeshBadWeightSumNegative(),
+             fixtureLinkedMeshImplicitSkin(), fixtureIkMixZero(),
+             fixtureMinimalMeshPlain()];
 const index = [];
 for (const fx of all) {
   for (const [rel, buf] of Object.entries(fx.files)) {

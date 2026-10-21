@@ -1,6 +1,6 @@
 # TASK 4：Spine 3.2.0.1 导入插件与骨架数据契约
 
-- 状态：`阶段 A 与 B0 复核通过`；**B1–B5 已由负责人核验通过（2026-10-21）**；**B6 实现与验证完成、待复核**（阶段 B 唯一未复核的工作包）
+- 状态：`阶段 A 与 B0 复核通过`；**B1–B6 全部由负责人核验通过（2026-10-21）—— 阶段 B 至此收尾**。B6 的复核证据（干净构建目录、7 个 CTest 目标、280 项断言、语料端到端复跑）见 `docs/skeleton/B6_REPORT.md` §10
 - 阶段 A 产物：`docs/skeleton/`（Domain 与兼容提案、插件宿主契约、字段映射表、样本 manifest、合成 fixture、验收报告）+ `tools/skeleton-probe/`（只读探针，4 个 `.mjs`）
 - 返修记录：第一轮见 `docs/skeleton/ACCEPTANCE.md` §7；第二轮见 §8；第三轮见 §9
 - **B2（2026-10-20 实现完成）**：新增 `domain/include/loongbones/domain/skeleton.hpp`（Skeleton/Bone/Slot/Skin/SkinEntry/RegionAttachment/SourceRef/BlendMode/ColorF + `IdKind` 五种新种类）与 `domain/src/skeleton.cpp`（校验判据集中在 `validateSkeleton()`，与将来的骨架写 API 共用）；`ProjectData` 增加 `skeletons`，`validate()` / `adoptData()` 覆盖全量规则。根骨契约为至少一个且允许多个，已在 v2 Schema 明确。新增 13 个诊断码（`SKELETON_*`）。测试 `tests/domain/test_skeleton.cpp` 覆盖每条拒绝规则、合法最小骨架、随机 ID、诊断定位与快照不变。**未实现**：Spine 二进制解析（B4）、骨架写 API（写 API 属后续包）
@@ -9,13 +9,13 @@
   **交付边界为「结构可读」而非「可转换」**：只有 region 附件与头/骨/槽/皮肤骨架进入 IR；mesh 族、boundingbox、全部动画时间线、IK/transform 参数**只遍历并计数，数据读完即弃**。不得据此宣称可渲染网格 / 可蒙皮 / 可播放动画。导入哪些、丢弃哪些及如何诊断，按 `docs/skeleton/task4_B4.md` §9 的交接清单由 B5 裁定（§9.3 三条硬约束，核心是**不得静默丢失**）。
   扫描工具的验收口径与退出码见 `task4_B4.md` §5.1：锁定样本 0 匹配时**必须**返回非 0（实测给错语料根 → 扫到 1131 个文件、0/0 匹配、退出码 4）。
   **B5/B6 此后已分别获准并完成**：B5 已核验通过（见 `docs/skeleton/B5_REPORT.md`）；
-  B6 实现与验证完成、**待负责人复核**（见 `docs/skeleton/B6_REPORT.md`）。
+  B6 实现、返修与复核均已完成并通过（见 `docs/skeleton/B6_REPORT.md` §10）。
 - **B5（2026-10-21 实现完成）**：新增 `atlas_text_reader.{hpp,cpp}`（`.atlas` 文本 → 插件私有 IR）与 `mapper.{hpp,cpp}`（Source → canonical `Skeleton`）。B1 里文件内私有的图集解析器已提出为公开 API 供 B5 复用，B1 行为不变。
   ID **全部**由宿主 `IIdFactory` 发放，源下标只在本次导入的局部映射表里解析。附件 region 查找键 **`path ?? name`**：精确命中正常建条目；未命中可按 `trim()` 重试并记 `ATTACHMENT_REGION_DEGRADED`（warning，T-B3）；仍未命中是 `ATTACHMENT_REGION_UNRESOLVED`（**error**，拒绝候选且不留半成品）。
   **不得静默丢失**：B4 只计数的能力（mesh 族 / boundingbox / 动画时间线 / IK / transform / 事件）**只产出计数与 warning，不建任何 Domain 对象**。
   测试 32 项（atlas Reader 17 + Mapper 15），含「映射结果过 `Project::adoptData()`」的闭环断言。语料扫描（`tools/spine32-mapper-smoke/`）：1113 个单位进入映射 1111（2 个缺图集）、**region 附件 27,457 全部命中、未命中 0**；27,457 + 20,252（非 region 跳过）= 47,709，与 `field-mapping.md` §10.1 的查找总数精确吻合 —— 即该文档记录的 4 例未命中落在**非 region** 附件上，本阶段不映射。产物见 `docs/skeleton/B5_REPORT.md`。
   **边界**：B5 不改变 B4 的「结构可读」结论 —— 无任何动画 / mesh / 蒙皮 / IK 进入 canonical。
-- **B6（2026-10-21 实现完成）**：新增 `importers/api/`（导入契约：插件接口 / 请求-草案-报告 / 诊断码 / 5 个宿主服务接口 / 路径与 SHA-256 工具）与
+- **B6（2026-10-21 实现完成，同日复核通过）**：新增 `importers/api/`（导入契约：插件接口 / 请求-草案-报告 / 诊断码 / 5 个宿主服务接口 / 路径与 SHA-256 工具）与
   `importers/host/`（`ImportRegistry` 静态注册表 + `commitImport()` 事务提交）。`importers/spine32/` 新增
   `spine32_import_plugin.{hpp,cpp}`（`prepare()`：二进制 → 图集 → 映射 → 域校验）与 `builtin_registration.cpp`
   （`registerBuiltinPlugins()` 的**插件侧**定义 —— 不用静态初始化器，因静态库里只有初始化器的目标文件
@@ -24,11 +24,19 @@
   `IResourceStaging` 实现仍留在插件侧，宿主只依赖接口。
   事务顺序 = stage（写临时文件并回读比对）→ publish（原子安装、拒绝覆盖）→ 原子 `saveProject()` → `complete()`；
   任一步失败只回滚本事务创建的文件，旧工程保持有效；析构函数兜底回滚未 complete 的事务。
-  测试 25 项（宿主事务 10 + 插件集成 15），含「提交后**重开**工程对象计数一致」的闭环断言。
+  测试 27 项（宿主事务 10 + 插件集成 17），含「提交后**重开**工程对象计数一致」的闭环断言。
+  **2026-10-21 复核返修**：`AtlasTextCode::kFeatureUnsupported` 不再一律映射成 `IMPORT_PARSE_ERROR`，
+  改为 `IMPORT_UNSUPPORTED_CAPABILITY`（warning）；新增 2 项断言（页属性为 warning 非解析错误 + 反向守护：
+  图集结构性失败仍是 `IMPORT_PARSE_ERROR`），并补齐 `B6_REPORT.md` §9 复核矩阵。
   语料端到端（`tools/skeleton-import-smoke/`，默认 OFF）：1113 个单位 prepare 成功 1111（2 个共享图集布局），
-  **region 未命中 0**，完整提交 + 重开 8/8 一致。产物见 `docs/skeleton/B6_REPORT.md`。
+  **region 未命中 0**，完整提交 + 重开 8/8 一致，退出码 **7**（2 项已知失败，**不是通过**）。产物见 `docs/skeleton/B6_REPORT.md`。
   **已知缺口**：共享图集布局（多个骨架共用一个与目录同名的 `.atlas.txt`）不支持 —— 需要给 `IResourceResolver`
-  增加目录列举能力，超出 B6 范围。
+  增加目录列举能力，超出 B6 范围，已作为交接项登记进 `Agent_Task/Task5.md` §8。
+  **复核证据（2026-10-21）**：干净构建目录 `..\.builds\build_b6_verify`（MinGW Makefiles / GCC / Release，
+  0 编译警告）；`ctest` 7/7 目标通过；断言合计 280（core 116 / format 70 / binary-read 27 / mapper 32 /
+  atlas-import 8 / skeleton-import 27 + 探针自检）；语料端到端复跑 **1113 单位 / 成功 1111 / 失败 2 /
+  region 未命中 0 / 退出码 7**，`IMPORT_PARSE_ERROR` 由返修前 3333 降为 **0**，
+  `IMPORT_UNSUPPORTED_CAPABILITY` 9463 —— 与 `B6_REPORT.md` §6 记录逐项吻合。
 - **数据类型报告（2026-10-21）**：已实现 canonical 类型总表、被误删重建文件的符号/字段逐一核对结果
   （4 个自由函数 + 2 个类 10 个成员函数**零缺失**）、后续待实现类型（mesh 族 / 动画 / 约束 / 事件，
   语料实测 `timelines` **4,988,424**）与残余风险，见 [`DataType_Report.md`](DataType_Report.md)。

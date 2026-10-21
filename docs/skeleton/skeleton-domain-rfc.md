@@ -606,6 +606,18 @@ deform、事件、多皮肤换装、皮肤混合。
 | Atlas / AtlasRegion / AtlasPage 映射与校验 | 实现范围 | 页 1111、region 43704；rotate true 17734；trim 0 |
 | AtlasPage 缩放因子 | 实现范围（页层） | 1107/1111 页声明尺寸 ≠ PNG 尺寸，判据支持 H2 |
 
+> 上表后 5 行是 **Task 5 第二批**（模型提案 `docs/skeleton/mesh-and-constraint-rfc.md`、
+> 格式提案 `docs/format/native-project-v3-mesh.md`，**阶段 A 提案，实现归 Task 5 阶段 B**）；
+> Task 4 的范围仍是前 7 行，不要把第二批算进「Task 4 首批支持」。
+
+下表（§10.2）中已划掉的两行即移至此处的能力。
+
+| **Mesh 附件**（非加权；顶点＝槽骨骼局部坐标） | 实现范围（**第二批**，Task 5） | 2,979（Full）；模型见 `mesh-and-constraint-rfc.md` §4 |
+| **WeightedMesh 附件**（每顶点绑定；顶点＝对应骨骼局部坐标） | 实现范围（**第二批**，Task 5） | 17,271；加权顶点 312,083；每顶点骨骼数 1…16 |
+| **LinkedMesh 附件**（引用父附件，不复制几何） | 实现范围（**第二批**，Task 5） | 2（`inheritDeform` true / false 各 1） |
+| **IK 约束**（含 `enabled` 布尔） | 实现范围（**第二批**，Task 5） | 2,707；链长 1…2；`mix` 只取 0/1 |
+| **Transform 约束**（mix / offset **原值承载，不解释语义**） | 实现范围（**第二批**，Task 5） | 208；mix 越出 [0,1] 且从未取到 1 |
+
 ### 10.2 不支持且有诊断（不保存源片段）
 
 本任务**不实现**，导入时产出诊断，工程内**不留任何等价物、不保存任何源片段/源字节**
@@ -617,8 +629,8 @@ deform、事件、多皮肤换装、皮肤混合。
 | **drawOrder 时间线** | 不支持且有诊断 | 14989 |
 | **deform 时间线** | 不支持且有诊断 | 335817 |
 | **事件（Event / 事件时间线）** | 不支持且有诊断 | 事件定义 1、事件时间线 0 |
-| **mesh / 加权 mesh / linked mesh** | 不支持且有诊断（模型提案见 §5.4，实现归后续任务） | 2981 / 17271 / 2 |
-| **IK / transform 约束参数** | 不支持且有诊断（模型提案见 §5.5，实现归后续任务） | 2707 / 208 |
+| ~~**mesh / 加权 mesh / linked mesh**~~ | **已移至 §10.1**（Task 5 第二批；模型见 `mesh-and-constraint-rfc.md`） | 2979 / 17271 / 2（旧口径 2981 = 2979 + linked 2） |
+| ~~**IK / transform 约束参数**~~ | **已移至 §10.1**（Task 5 第二批；模型见 `mesh-and-constraint-rfc.md`） | 2707 / 208 |
 | **path 约束** | 不支持且有诊断 | 0（无样本可验证） |
 | **boundingbox / clipping / path 附件** | 不支持且有诊断 | 0 |
 | **图集 `index`（sequence）** | 不支持且有诊断 | 0 例非 -1 |

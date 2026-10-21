@@ -117,7 +117,16 @@ std::string stemOf(std::string_view path) {
 }
 
 api::ImportCode toImportCode(AtlasTextCode code) noexcept {
-  return code == AtlasTextCode::kNone ? api::ImportCode::kNone : api::ImportCode::kParseError;
+  switch (code) {
+    case AtlasTextCode::kNone: return api::ImportCode::kNone;
+    // 「页/区域属性不进当前 Domain 模型」是**能力缺口**，不是解析失败。
+    // 曾把所有非 kNone 一律映射成 kParseError，于是语料里 3333 条
+    // 「页属性未保存」告警被计成解析错误（B6 复核发现项，2026-10-21）。
+    case AtlasTextCode::kFeatureUnsupported: return api::ImportCode::kUnsupportedCapability;
+    case AtlasTextCode::kSyntax:
+    case AtlasTextCode::kValueInvalid: break;
+  }
+  return api::ImportCode::kParseError;
 }
 
 api::ImportCode toImportCode(MapperCode code) noexcept {

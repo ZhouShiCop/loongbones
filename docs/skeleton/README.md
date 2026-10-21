@@ -1,6 +1,6 @@
 # 骨架模块设计文档（Task 4 · 阶段 A / 阶段 B 前置）
 
-> **状态：阶段 A 与 B0 复核通过；B1 实现与验证完成、待复核；B2/B3 实现完成；B4 Reader 全语料通过（Full 1113/1113、Primary 963/963，manifest 锁定样本 16/16），交付边界为「结构可读」；B5 Atlas Reader + Mapper 实现完成（32 项测试、全语料 region 未命中 0）；B6 实现完成（25 项测试、语料 1113 单位 prepare 全通过、8 个单位提交+重开闭环一致、7 个 CTest 目标绿）。**
+> **状态：阶段 A 与 B0 复核通过；B1–B6 全部复核通过（2026-10-21），阶段 B 收尾。** B4 Reader 全语料通过（Full 1113/1113、Primary 963/963，manifest 锁定样本 16/16），交付边界为「结构可读」；B5 Atlas Reader + Mapper（32 项测试、全语料 region 未命中 0）；B6 静态插件宿主（27 项测试；语料 1113 单位跑过 prepare、成功 1111 / 失败 2；8 个单位提交+重开闭环一致；smoke 退出码 7，属已知缺口不是通过；干净构建目录 7 个 CTest 目标绿、280 项断言、0 编译警告；复核证据见 `B6_REPORT.md` §10）。
 > 阶段 A 只做**设计契约与证据**：不写产品读取器、不写 GUI、不写渲染。
 > 返修依据：`../Agent_Task/Task4_Back_task.md`；三轮返修记录见 `ACCEPTANCE.md` §7 / §8 / §9。
 > 阶段 B 启动门槛与工作包拆分见 `../Agent_Task/Task4_Implementation_Plan.md`；
