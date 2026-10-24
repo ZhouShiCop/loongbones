@@ -14,6 +14,8 @@
 #include "loongbones/domain/skeleton.hpp"
 
 #include <cmath>
+#include <cstdint>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -228,12 +230,159 @@ void checkSlots(const Skeleton& s, std::vector<Diagnostic>& out) {
   }
 }
 
+/// region 附件：保持 Task 4 B2 的既有判据不变（数值有限 + region 跨图集闭合）。
+void checkRegion(const RegionAttachment& a, const std::string& where, const ProjectData& project,
+                 std::vector<Diagnostic>& out) {
+  if (!isFiniteNumber(a.x) || !isFiniteNumber(a.y) || !isFiniteNumber(a.rotationDeg) ||
+      !isFiniteNumber(a.scaleX) || !isFiniteNumber(a.scaleY) ||
+      !isFiniteNumber(a.width) || !isFiniteNumber(a.height) || !a.color.isFinite()) {
+    out.emplace_back(DiagnosticCode::kSkeletonValueNotFinite, "附件数值含 NaN 或 Inf", where);
+  }
+  if (!regionExists(project, a.regionId)) {
+    out.emplace_back(DiagnosticCode::kRegionNotFound, "附件引用的图集区域不存在", where);
+  }
+}
+
+/// 附件引用的 AtlasRegion 闭合（mesh 族共用）。
+void checkRegionRef(const AtlasRegionId& id, const std::string& where, const ProjectData& project,
+                    std::vector<Diagnostic>& out) {
+  if (!regionExists(project, id)) {
+    out.emplace_back(DiagnosticCode::kRegionNotFound, "附件引用的图集区域不存在", where);
+  }
+}
+
+bool allFinite(const std::vector<double>& values) noexcept {
+  for (double v : values) {
+    if (!isFiniteNumber(v)) return false;
+  }
+  return true;
+}
+
+/// mesh / 加权 mesh 共用的几何判据：顶点数与 uvs 长度一致、UV 落在 [0,1]、三角索引不越界。
+void checkMeshGeometry(const std::vector<double>& uvs, const std::vector<std::uint32_t>& triangles,
+                       std::size_t vertexCount, const std::string& where,
+                       const std::vector<double>& extraFinite, std::vector<Diagnostic>& out) {
+  if (vertexCount == 0 || uvs.size() % 2 != 0 || uvs.size() != vertexCount * 2) {
+    out.emplace_back(DiagnosticCode::kMeshVertexGeometryInvalid,
+                     "mesh 顶点数为 0，或 uvs 长度与顶点数不匹配（须为 2×顶点数）", where);
+  }
+  if (!allFinite(uvs)) {
+    out.emplace_back(DiagnosticCode::kSkeletonValueNotFinite, "mesh UV 含 NaN 或 Inf", where);
+  }
+  for (double v : uvs) {
+    if (isFiniteNumber(v) && (v < 0.0 || v > 1.0)) {
+      out.emplace_back(DiagnosticCode::kMeshUvOutOfRange, "mesh UV 越出 [0,1]", where);
+      break;
+    }
+  }
+  for (std::uint32_t t : triangles) {
+    if (t >= vertexCount) {
+      out.emplace_back(DiagnosticCode::kMeshTriangleIndexOutOfRange,
+                       "mesh 三角索引越界（须小于顶点数）", where);
+      break;
+    }
+  }
+  if (!allFinite(extraFinite)) {
+    out.emplace_back(DiagnosticCode::kSkeletonValueNotFinite, "mesh 数值含 NaN 或 Inf", where);
+  }
+}
+
+/// 加权 mesh：绑定闭合（骨骼存在）、绑定非空、权重和**有限且 > 0**（D37）。
+/// 单条负权重合法（D34），判据是权重和而非单条符号。
+void checkWeightedMesh(const WeightedMeshAttachment& m,
+                       const std::unordered_set<std::string>& boneIds, const std::string& where,
+                       const ProjectData& project, std::vector<Diagnostic>& out) {
+  checkMeshGeometry(m.uvs, m.triangles, m.vertexBindings.size(), where,
+                    {m.width, m.height}, out);
+  for (const std::vector<VertexBinding>& binds : m.vertexBindings) {
+    if (binds.empty()) {
+      out.emplace_back(DiagnosticCode::kMeshBindingCountInvalid, "顶点没有任何骨骼绑定", where);
+      continue;
+    }
+    double sum = 0.0;
+    bool finite = true;
+    for (const VertexBinding& b : binds) {
+      if (boneIds.find(b.boneId.str()) == boneIds.end()) {
+        out.emplace_back(DiagnosticCode::kMeshWeightBoneUnresolved, "绑定指向不存在的骨骼", where);
+      }
+      if (!isFiniteNumber(b.x) || !isFiniteNumber(b.y) || !isFiniteNumber(b.weight)) {
+        finite = false;
+      } else {
+        sum += b.weight;
+      }
+    }
+    if (!finite) {
+      out.emplace_back(DiagnosticCode::kSkeletonValueNotFinite, "绑定的坐标或权重含 NaN 或 Inf",
+                       where);
+      continue;
+    }
+    if (!(sum > 0.0)) {
+      out.emplace_back(DiagnosticCode::kMeshWeightSumInvalid,
+                       "顶点权重和必须有限且 > 0（D37：和为 0 或为负均拒绝）", where);
+    }
+  }
+  checkRegionRef(m.regionId, where, project, out);
+}
+
+/// linked mesh：几何不复制，只校验父引用 (parentSlotId, attachmentName) 能在本骨架内解析。
+void checkLinkedMesh(const LinkedMeshAttachment& l,
+                     const std::unordered_set<std::string>& attachmentKeys,
+                     const std::string& where, const ProjectData& project,
+                     std::vector<Diagnostic>& out) {
+  const std::string key = l.parentSlotId.str() + "\x1f" + l.parentAttachmentName;
+  if (attachmentKeys.find(key) == attachmentKeys.end()) {
+    out.emplace_back(DiagnosticCode::kMeshLinkedParentUnresolved,
+                     "linked mesh 引用的父附件不存在", where);
+  }
+  checkRegionRef(l.regionId, where, project, out);
+}
+
+/// 附件分派：region 走既有判据，mesh 族走第二批判据。
+void checkAttachment(const Attachment& att, const std::unordered_set<std::string>& boneIds,
+                     const std::unordered_set<std::string>& attachmentKeys,
+                     const std::string& where, const ProjectData& project,
+                     std::vector<Diagnostic>& out) {
+  std::visit(
+      [&](const auto& a) {
+        using T = std::decay_t<decltype(a)>;
+        if constexpr (std::is_same_v<T, RegionAttachment>) {
+          checkRegion(a, where, project, out);
+        } else if constexpr (std::is_same_v<T, MeshAttachment>) {
+          checkMeshGeometry(a.uvs, a.triangles, a.vertices.size() / 2, where, a.vertices, out);
+          if (!isFiniteNumber(a.width) || !isFiniteNumber(a.height)) {
+            out.emplace_back(DiagnosticCode::kSkeletonValueNotFinite, "mesh 数值含 NaN 或 Inf",
+                             where);
+          }
+          checkRegionRef(a.regionId, where, project, out);
+        } else if constexpr (std::is_same_v<T, WeightedMeshAttachment>) {
+          checkWeightedMesh(a, boneIds, where, project, out);
+        } else {
+          checkLinkedMesh(a, attachmentKeys, where, project, out);
+        }
+      },
+      att);
+}
+
 /// 皮肤侧：ID 形态/种类/重复、slotId 闭合、自然键 (slotId, attachmentName) 唯一、
 /// 附件数值有限、附件 region 跨图集闭合。
 void checkSkins(const Skeleton& s, const ProjectData& project, std::vector<Diagnostic>& out) {
   std::unordered_set<std::string> slotIds;
   slotIds.reserve(s.slots.size() * 2U + 1U);
   for (const Slot& sl : s.slots) slotIds.insert(sl.id.str());
+
+  // 加权绑定的骨骼闭合用。
+  std::unordered_set<std::string> boneIds;
+  boneIds.reserve(s.bones.size() * 2U + 1U);
+  for (const Bone& b : s.bones) boneIds.insert(b.id.str());
+
+  // linked 父引用闭合用：**先全量收集再校验**（D38 两阶段），
+  // 否则子附件写在父附件之前就会误报，重演旧 Reader「找不到父」的失败。
+  std::unordered_set<std::string> attachmentKeys;
+  for (const Skin& skin : s.skins) {
+    for (const SkinEntry& e : skin.entries) {
+      attachmentKeys.insert(e.slotId.str() + "\x1f" + e.attachmentName);
+    }
+  }
 
   std::unordered_set<std::string> skinIds;
   skinIds.reserve(s.skins.size() * 2U + 1U);
@@ -266,15 +415,56 @@ void checkSkins(const Skeleton& s, const ProjectData& project, std::vector<Diagn
         out.emplace_back(DiagnosticCode::kSkeletonSkinEntryDuplicate,
                          "同一皮肤内 (插槽, 附件名) 重复", where);
       }
-      const RegionAttachment& a = e.attachment;
-      if (!isFiniteNumber(a.x) || !isFiniteNumber(a.y) || !isFiniteNumber(a.rotationDeg) ||
-          !isFiniteNumber(a.scaleX) || !isFiniteNumber(a.scaleY) ||
-          !isFiniteNumber(a.width) || !isFiniteNumber(a.height) || !a.color.isFinite()) {
-        out.emplace_back(DiagnosticCode::kSkeletonValueNotFinite, "附件数值含 NaN 或 Inf", where);
+      checkAttachment(e.attachment, boneIds, attachmentKeys, where, project, out);
+    }
+  }
+}
+
+/// 第二批约束（Task 5 B1）：ID 形态/种类、骨骼与目标骨闭合、链非空、数值有限。
+///
+/// **不校验** mix / offset 的语义取值域 —— 按 D36 它们是原值承载，语义待 V3 取证。
+void checkConstraints(const Skeleton& s, std::vector<Diagnostic>& out) {
+  std::unordered_set<std::string> boneIds;
+  boneIds.reserve(s.bones.size() * 2U + 1U);
+  for (const Bone& b : s.bones) boneIds.insert(b.id.str());
+
+  for (const IkConstraint& c : s.ikConstraints) {
+    const std::string where = skeletonLoc(s.id) + "/ikConstraints/" + c.id.str();
+    checkId(c.id, IdKind::IkConstraint, where, "IK 约束", out);
+    if (c.boneIds.empty()) {
+      out.emplace_back(DiagnosticCode::kConstraintChainEmpty, "IK 骨骼链为空", where);
+    }
+    for (const BoneId& b : c.boneIds) {
+      if (boneIds.find(b.str()) == boneIds.end()) {
+        out.emplace_back(DiagnosticCode::kConstraintTargetUnresolved, "IK 链内骨骼不存在", where);
       }
-      if (!regionExists(project, a.regionId)) {
-        out.emplace_back(DiagnosticCode::kRegionNotFound, "附件引用的图集区域不存在", where);
-      }
+    }
+    if (boneIds.find(c.targetBoneId.str()) == boneIds.end()) {
+      out.emplace_back(DiagnosticCode::kConstraintTargetUnresolved, "IK 目标骨不存在", where);
+    }
+    if (!isFiniteNumber(c.mix)) {
+      out.emplace_back(DiagnosticCode::kSkeletonValueNotFinite, "IK mix 含 NaN 或 Inf", where);
+    }
+  }
+
+  for (const TransformConstraint& c : s.transformConstraints) {
+    const std::string where = skeletonLoc(s.id) + "/transformConstraints/" + c.id.str();
+    checkId(c.id, IdKind::TransformConstraint, where, "Transform 约束", out);
+    if (boneIds.find(c.boneId.str()) == boneIds.end()) {
+      out.emplace_back(DiagnosticCode::kConstraintTargetUnresolved, "Transform 受约束骨不存在",
+                       where);
+    }
+    if (boneIds.find(c.targetBoneId.str()) == boneIds.end()) {
+      out.emplace_back(DiagnosticCode::kConstraintTargetUnresolved, "Transform 目标骨不存在",
+                       where);
+    }
+    if (!isFiniteNumber(c.rotateMix) || !isFiniteNumber(c.translateMix) ||
+        !isFiniteNumber(c.scaleMix) || !isFiniteNumber(c.shearMix) ||
+        !isFiniteNumber(c.offsetRotation) || !isFiniteNumber(c.offsetX) ||
+        !isFiniteNumber(c.offsetY) || !isFiniteNumber(c.offsetScaleX) ||
+        !isFiniteNumber(c.offsetScaleY) || !isFiniteNumber(c.offsetShearY)) {
+      out.emplace_back(DiagnosticCode::kSkeletonValueNotFinite,
+                       "Transform 约束的 mix / offset 含 NaN 或 Inf", where);
     }
   }
 }
@@ -304,6 +494,7 @@ std::vector<Diagnostic> validateSkeleton(const Skeleton& s, const ProjectData& p
   checkBones(s, out);
   checkSlots(s, out);
   checkSkins(s, project, out);
+  checkConstraints(s, out);
   checkAtlasRefs(s, project, out);
   checkSourceRef(s, out);
   return out;

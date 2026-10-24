@@ -262,3 +262,59 @@ path 约束、clipping 附件、`boundingbox` 的**实现**、多皮肤换装 / 
 - 新增 **v3 fixture**：最小 mesh、加权 mesh（含负权重）、linked mesh、畸形引用（越界）、
   约束（IK + transform）、v2→v3 迁移前后语义比较。
 - 预期结果与「哪些只是合成、无真实样本」在 `docs/skeleton/fixtures/README.md` 登记。
+
+---
+
+## 11. 实现同步记录（2026-10-22，阶段 B 的 B2 落地）
+
+本文 §1–§10 是**提案**；本节记录**实现**与提案的差异、以及评审提出的补正，落地后以本节为准。
+
+### 11.1 已实现
+
+| 提案项 | 实现位置 | 状态 |
+|---|---|---|
+| `formatVersion` / `minimumReaderVersion` → 3 | `format/include/loongbones/format/codec.hpp`（`kFormatVersion` / `kReaderMaxVersion` = 3，`kReaderMinVersion` 保持 1） | ✅ |
+| 4 种附件按 `type` 分派 | `format/src/decode.cpp` `decodeAttachment()` / `format/src/encode.cpp` `emitAttachment()` | ✅ |
+| 未知 `attachment.type` 显式拒绝 | `decodeAttachment()` → `kJsonTypeMismatch`（不降级为 region） | ✅ |
+| `IkConstraint` / `TransformConstraint` 读写 | `decodeIkConstraint()` / `decodeTransformConstraint()` / 对应 emit | ✅ |
+| `OwnerKind` 新增 2 项 | `format/include/loongbones/format/project_document.hpp` | ✅ |
+| `migrateV2ToV3()` | `format/src/decode.cpp`；**纯函数、幂等、只标记 `sourceVersion`** | ✅（见 11.3） |
+| 骨架两个约束键恒存在 | 写出恒写（可空数组）；读取时**缺失视为空数组** | ✅ |
+
+### 11.2 评审 P0：已知键表**按 type 分派**（不得用并集）
+
+实现的已知键表：`kRegionAttachmentKeys` / `kMeshAttachmentKeys` / `kWeightedMeshAttachmentKeys` /
+`kLinkedMeshAttachmentKeys` / `kParentKeyKeys` / `kVertexBindingKeys` /
+`kIkConstraintKeys` / `kTransformConstraintKeys`。
+
+**理由**：若把 mesh 族的键并进 region 的键表，region 附件里出现的 `uvs` 会被当成"已知键"而
+**静默丢弃**，拼错的文档被悄悄存回而不报错。分派后，类型不符的字段一律走**未知字段通道**
+（保留原值并回写），既不丢也不误解析。
+
+骨架层同理：`kSkeletonKeys` 必须含 `ikConstraints` / `transformConstraints`，
+否则这两个键会被收成未知字段、再被回写成**重复键** —— 多一轮往返即解析失败。
+
+### 11.3 迁移与读取规则的实现细节
+
+- `migrateV2ToV3()` 实际只做**版本标记**：v2 文档的两个约束键在解码时已按"缺失 = 空数组"处理，
+  迁移结果与之等价；附件逐个不改（v2 只有 region）。
+- 本 Reader 的读取上限是 **3**：`formatVersion = 4` 必须被拒（既有断言已相应更新，
+  变更逐条披露于 `Agent_Task/Task5_B1B2_Report.md` §5）。
+- 权重含 NaN / ±Inf 时只报 `SKELETON_VALUE_NOT_FINITE`，**不叠加** `MESH_WEIGHT_SUM_INVALID`
+  （权重和此时无法判定，避免同一处重复报两条）。
+
+### 11.4 未知字段的嵌套子路径约定（decode 与 encode 逐字一致）
+
+| 位置 | 相对子路径 |
+|---|---|
+| 附件对象 | `/attachment` |
+| linked 的 `parentKey` 对象内 | `/attachment/parentKey` |
+| weighted 的某个绑定对象内 | `/attachment/vertexBindings/{i}/{j}` |
+
+约束对象（IK / transform）自身的未知字段挂在**其自身锚点**（`kIkConstraint` / `kTransformConstraint` + 约束 ID），
+子路径为空 —— 评审 G2 指出的「约束对象未知字段只写不读」已修正（此前解码侧不收集，锚点无来源）。
+
+### 11.5 未决
+
+`kFormatTooNew` / `kCapabilityUnsupported` 的命名分歧：本文按 v2 冻结稿取 **`kFormatTooNew`**，
+**待负责人最终裁定**；实现侧尚未为这两个码新增行为，仅沿用既有格式诊断码。

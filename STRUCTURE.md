@@ -36,9 +36,21 @@
 | `docs/skeleton/mesh-and-constraint-rfc.md` | **Task 5 A2**：第二批附件与约束 canonical 模型提案（mesh / weightedMesh / linkedMesh / boundingbox 占位 / IK / transform；含顶点空间证据与 golden 计划、TBD-A…TBD-F） | **阶段 A 提案，待负责人审阅**；实现归阶段 B |
 | `docs/format/native-project-v3-mesh.md` | **Task 5 A3**：原生格式 v3 Schema 提案（v2 + 第二批骨架类型增量；`formatVersion = 3`、迁移链 v1→v2→v3、不引入新 capability，D29） | **阶段 A 提案，待负责人审阅**；不改写 v2 冻结稿 |
 | `Agent_Task/Task5.md` | Task 5 第二批静态数据建模与导入规格（含 A1 取证报告、复核记录、A2/A3 提案指针） | **阶段 A 六项全部完成并验收通过（2026-10-22，见 `Agent_Task/Task5_A6_Acceptance.md`）**；**阶段 B 已于 2026-10-22 批准并开工（实现会话执行中）** |
-| `Agent_Task/Task5_Implementation_Plan.md` | **Task 5 阶段 B 方案**：B1 Domain 第二批类型 → B2 原生格式 v3（三读一写）→ B3 Reader/Mapper → B4 插件诊断 → B5 语料闭环 | **已批准（2026-10-22），阶段 B 执行中**；R1 已满足（B6 基线已提交） |
+| `Agent_Task/Task5_Implementation_Plan.md` | **Task 5 阶段 B 方案**：B1 Domain 第二批类型 → B2 原生格式 v3（三读一写）→ B3 Reader/Mapper → B4 插件诊断 → B5 语料闭环 | **已完成并归档（2026-10-24）**：B1–B5 全部通过复核；归档报告 `Agent_Task/Task5_Completion_Report.md`，Task 5 此后不再新增改动 |
+| `Agent_Task/Task5_Completion_Report.md` | **Task 5 归档报告**：交付总览、最终验收证据（双口径 1113/963、逐项比对 18067 项零残差）、D29–D42 决策、遗留项交接、过程中的教训 | **2026-10-24 归档** |
+| `Agent_Task/Task6_Implementation_Plan.md` | **Task 6 方案**：阶段 A（A1 取证 / A2 接口提案 / A3 资产语义 / A4 fixture）+ 阶段 B（B1 接口 / B2 匹配与诊断 / B3 测试与语料对账） | **阶段 A 已完成并通过验收（2026-10-24）**；**阶段 B 已获授权开工**（§7）。契约：**D40 / D53 / D54**。**体量小**，不扩成通用图集发现机制 |
+| `Agent_Task/Task6_B_Review.md` | **Task 6 阶段 B 复核记录**：独立复跑（ctest 7/7、135/86/47/48/46/9、Full 1113 / Primary 963、smoke exit 0）、6 条断言逐条核对、**P1：D53 未落地**（共享图集仍各建一份 Atlas/Texture；`skeleton-import-smoke:446-449` 把"1 单位=1 图集"写死）、根因＝域模型无「源文件身份」字段 + v3 已冻结、P2（兼容层/报告矛盾/仓库内 build_t6） | **通过（2026-10-24，D55 裁定后）**：D53 延后到 Task 7 / v4，Task 6 记已知限制；3 项非阻断返修随 Task 7 同批 |
+| `Agent_Task/Task6_A1A3_Review.md` | **Task 6 阶段 A（A1–A4）复核记录**：独立复跑证据（Full 1113 / Primary 963 逐项吻合）、7 条判据逐条核对、**P1 口径偏差**（解析路径 0 例 ≠ 语料无样本）、守卫样本表、A3→D53、A4 三个 fixture、返修与闭环记录 | **通过（2026-10-24）**：P1/P2 全部闭环、A4 已交付 ⇒ 阶段 B 已开工（其验收见 `Task6_B_Review.md`：**首轮不通过**） |
+| `docs/skeleton/shared-atlas-layout-evidence.md` | **Task 6 A1 取证报告**：共享图集布局的语料实测（只有 `h0164s5/watch/` 一处、2 个单位；真实形态为 `<上级目录名>_<目录名>.atlas.txt`）、共享图集页 PNG 与共用关系、Q6-2 / Q6-3 结论 | **已交付并修正（2026-10-24）**：Q6-2 / Q6-3 已改为**双口径**（候选存在性 / 解析路径），探针同步输出 `候选存在性` 键；结论落 **D54** |
+| `Agent_Task/Task7_Implementation_Plan.md` | **Task 7 阶段 A 方案**：A1 时间线普查（探针+报告）/ A2 时间语义契约（D47）/ A3 曲线·手柄（D44）/ A4 v4 schema（D46+D55+D49）/ A5 顶点 ID 契约（D42）/ A6 渲染 ADR（D43/D50–D52）/ A7 fixture | **阶段 A 可开工（2026-10-24 立项）**；只取证与提案、**不实现**；开工前置含 Task 6 收尾 3 项与「先提交叠加栈」 |
+| `Agent_Task/Task7.md` | **Task 7 范围草案**：对齐 Spine 的完整能力实现 —— 动画 / 全部时间线（`timelines` 4,988,424）、deform（335,817）、事件、`BoundingBox` 处置、皮肤相关、非权重绑定求值 | **已立项（2026-10-24）**，阶段 A 方案见 `Task7_Implementation_Plan.md`。**Q7-1…Q7-8 已全部裁定 → `DECISIONS.md` D43–D52**：渲染实现延后但**选型须在阶段 A 定案**（**Qt 版本不绑定 ⇒ QRhi 出局**；推荐 QOpenGLWidget + 自研 OpenGL core，备选 bgfx；平台 Windows>macOS>Linux、AMD 核显基线）、时间线取值**完全扩展**（曲线 / 手柄）、绑定只做**非权重**部分、**原生格式升 v4**、**先定时间平滑程度等基础问题**。**Q7-3 已裁定**：`BoundingBox` **纳入**（非权重口径，**D49，取代 D32**）；**QML 采用**（D50，界面承载，视口经 `QQuickFramebufferObject` 接入自研渲染器）；**bgfx 接受但作后期单独发行版本**（D51）；**硬件基线＝尽可能支持**（D52）。剩余：渲染选型 ADR 正式签定、时间平滑程度等基础问题（D47） |
 | `Agent_Task/Task5_A6_Acceptance.md` | Task 5 阶段 A 验收记录（交付物、停点纪律、一致性 5 项、未决项、阶段 B 开工前置） | **阶段 A 验收通过** |
+| `Agent_Task/Task5_B1B2_Report.md` | Task 5 阶段 B 的 B1 + B2 完成报告（实现会话） | B1 + B2 代码完成；**复核不通过**（P0），见复核记录 |
+| `Agent_Task/Task5_B1B2_Review.md` | **B1 + B2 复核记录**：复现结果、通过项、P0 阻断缺陷（v3 保存后重复键）、返修清单、**二次复核 §7（通过：多轮往返无重复键、core 135 / format 86、零 warning、ctest 7/7）** | **首轮不通过 → 二次复核通过**（2026-10-22 晚）；B1/B2 验收解除，解锁 B3 |
+| `Agent_Task/Task5_B3_Report.md` | Task 5 阶段 B 的 B3 完成报告（实现会话，第二轮）：reader/mapper 真实解析第二批 + 16 fixture 接入 + 两个真实缺陷修复 | B3 代码完成、零回归、语料闭环通过 |
+| `Agent_Task/Task5_B3_Review.md` | **B3 复核记录**：首轮 P0-1（16 fixture 未做）/ P0-2（断言下限）/**二次复核通过**（2026-10-22 晚）；含语料 1113 端到端独立复跑 | **二次复核通过**（首轮不通过、返修后通过） |
 | `Agent_Task/Task6.md` | Task 6 共享图集布局（B6 已知缺口，2 个单位）独立规格 | 待负责人裁定 Q6-1…Q6-3 |
+| `Agent_Task/Type_Coverage_Status.md` | **类型覆盖台账（视图）**：尚未实现的类型 / 能力、语料规模、排期量级、硬阻塞前置、验收锚点 | 2026-10-22 首版。冲突时以各 Task 与 `DECISIONS.md` 为准 |
 | `tools/skeleton-probe/` | Spine 3.2.01 骨架契约只读探针 + 合成 fixture 生成器（登记见 §2.4） | Task 4 阶段 A 已交付 |
 | `docs/scene-system/` | 独立场景系统基础模型设计及后续实现规格 | 基础设计已记录；实现待排期 |
 | `Agent_Task/Task1.md` | Task 1 核心数据模型任务与现行场景层级契约 | 原任务完成；其中父级限制由新契约取代，Task 2 更新实现 |
@@ -141,13 +153,13 @@ node tools/corpus-scan/select-samples.mjs    # 产出 sample-selection.md、out/
 | | |
 |---|---|
 | 相对路径 | `tools/skeleton-probe/` |
-| 用途 | 为骨架 Domain/插件宿主 RFC 提供**可复现的数值证据**：版本/三件套、对象计数、引用闭合、名称唯一性、附件 `path` 语义、图集形态（rotate/trim/pma/format）、附件→region 查找率、图集页坐标空间像素判据；**Task 5 A1 第二批静态数据取证**（加权顶点骨骼数/权重和/索引越界、顶点空间判据、`hull`/`edges` 出现率、boundingbox 0 例、LinkedMesh 逐条、IK / transform 取值域）；并生成**合成 fixture**（不含游戏资产） |
+| 用途 | 为骨架 Domain/插件宿主 RFC 提供**可复现的数值证据**：版本/三件套、对象计数、引用闭合、名称唯一性、附件 `path` 语义、图集形态（rotate/trim/pma/format）、附件→region 查找率、图集页坐标空间像素判据；**Task 5 A1 第二批静态数据取证**（加权顶点骨骼数/权重和/索引越界、顶点空间判据、`hull`/`edges` 出现率、boundingbox 0 例、LinkedMesh 逐条、IK / transform 取值域）；并生成**合成 fixture**（不含游戏资产）；**Task 6 A1 共享图集布局取证**（全部「骨架 ↔ 图集不同名」单位的形态分类、共享图集页 PNG 与共用单位数、Q6-2/Q6-3 的样本有无） |
 | 适用场景 | Task 4 阶段 A 的证据产出；阶段 B 用其中的合成 fixture 做导入插件回归 |
 | 使用说明 | [`tools/skeleton-probe/README.md`](tools/skeleton-probe/README.md) |
-| 运行入口 | `node tools/skeleton-probe/probe.mjs <语料根> -o tools/skeleton-probe/out`；`node tools/skeleton-probe/png-page-probe.mjs <语料根> --limit 24`；`node tools/skeleton-probe/make-fixture.mjs --verify`；`node tools/skeleton-probe/emit-samples.mjs`（样本 manifest 数据表）；`node tools/skeleton-probe/vert-probe.mjs <相对路径> <起始偏移> <顶点数> <目标结束偏移>`（在给定偏移上试各种顶点区布局，看哪种正好落在目标结束偏移）；`node tools/skeleton-probe/mesh-constraint-probe.mjs <语料根> -o tools/skeleton-probe/out`（Task 5 A1 第二批数据取证，Full/Primary 双口径）；`node tools/skeleton-probe/tc1-space-control.mjs <语料根>`（Task 5 A1 顶点空间判据的**对照实验**，用已知答案样本自检判据）；`node tools/skeleton-probe/type-byte-census.mjs <语料根> -o tools/skeleton-probe/out`（Task 5 A1 **TBD-F**：附件类型字节直接普查，不复用旧 Reader，按 `binary_reader.cpp` 已验证布局独立走字节）；`node tools/skeleton-probe/weight-sum-census.mjs <语料根>`（Task 5 A5 **D37**：加权顶点权重和分布普查 —— `sum=0` / `sum<0` / 非有限 / 离差计数与 min/max） |
+| 运行入口 | `node tools/skeleton-probe/probe.mjs <语料根> -o tools/skeleton-probe/out`；`node tools/skeleton-probe/png-page-probe.mjs <语料根> --limit 24`；`node tools/skeleton-probe/make-fixture.mjs --verify`；`node tools/skeleton-probe/emit-samples.mjs`（样本 manifest 数据表）；`node tools/skeleton-probe/vert-probe.mjs <相对路径> <起始偏移> <顶点数> <目标结束偏移>`（在给定偏移上试各种顶点区布局，看哪种正好落在目标结束偏移）；`node tools/skeleton-probe/mesh-constraint-probe.mjs <语料根> -o tools/skeleton-probe/out`（Task 5 A1 第二批数据取证，Full/Primary 双口径）；`node tools/skeleton-probe/tc1-space-control.mjs <语料根>`（Task 5 A1 顶点空间判据的**对照实验**，用已知答案样本自检判据）；`node tools/skeleton-probe/type-byte-census.mjs <语料根> -o tools/skeleton-probe/out`（Task 5 A1 **TBD-F**：附件类型字节直接普查，不复用旧 Reader，按 `binary_reader.cpp` 已验证布局独立走字节）；`node tools/skeleton-probe/weight-sum-census.mjs <语料根>`（Task 5 A5 **D37**：加权顶点权重和分布普查 —— `sum=0` / `sum<0` / 非有限 / 离差计数与 min/max）；`node tools/skeleton-probe/shared-atlas-layout-probe.mjs <语料根> -o tools/skeleton-probe/out`（Task 6 A1 共享图集布局取证，Full 1113 / Primary 963 双口径，Primary 正则与 `mesh-constraint-probe.mjs` 逐字一致） |
 | `vert-probe.mjs` | 走查专用：语料根**不写死在源码里**，由 `$LOONGBONES_CORPUS_ROOT` 提供（规范 §8.2）；缺参即退出码 2 |
 | 输入 | 语料根目录（**只读**），由 `$LOONGBONES_CORPUS_ROOT` 或首参数提供；fixture 模式输入 `docs/skeleton/fixtures/` |
-| 输出 | `tools/skeleton-probe/out/`（生成目录，可删可重建；含 `mesh-constraint-probe.json/.md`、`type-byte-census.md`；权重和普查只打印到 stdout）；`docs/skeleton/fixtures/`（**入库**的合成 fixture，**16 个**：5 个首批 Task 4 + 11 个第二批 Task 5 A5 —— 最小 mesh(nonessential=1) / 最小 mesh(nonessential=0，语料主流) / 加权含负权重 / linked 类型4 / linked 类型5（语料同构）/ 三角索引越界 / 骨骼下标越界 / 权重和=0 / 权重和<0 / 约束 mix=1 / 约束 mix=0） |
+| 输出 | `tools/skeleton-probe/out/`（生成目录，可删可重建；含 `mesh-constraint-probe.json/.md`、`type-byte-census.md`；权重和普查只打印到 stdout）；`docs/skeleton/fixtures/`（**入库**的合成 fixture：01–16 扁平文件 + **17–19 目录型**（共享图集布局），**16 个**：5 个首批 Task 4 + 11 个第二批 Task 5 A5 —— 最小 mesh(nonessential=1) / 最小 mesh(nonessential=0，语料主流) / 加权含负权重 / linked 类型4 / linked 类型5（语料同构）/ 三角索引越界 / 骨骼下标越界 / 权重和=0 / 权重和<0 / 约束 mix=1 / 约束 mix=0） |
 | 依赖 | Node.js v22+；旧项目 Reader `converter/src/read/binary32.ts`、`converter/src/model.ts`、`converter/src/atlas.ts`（**分析工具借用，非产品代码**）；零第三方库 |
 | 可安全重跑 | 是（按路径排序 + 纯聚合，输出确定） |
 | 纪律 | 只读语料；输出只含相对路径 + hash + 计数，**不写绝对路径、不复制/落地任何游戏资产** |
@@ -255,11 +267,11 @@ node tools/corpus-scan/select-samples.mjs    # 产出 sample-selection.md、out/
 | 使用说明 | [`tools/skeleton-import-smoke/README.md`](tools/skeleton-import-smoke/README.md) |
 | 运行入口 | `cmake -S . -B <build> -DLOONGBONES_BUILD_SKELETON_IMPORT_SMOKE=ON`；`cmake --build <build> --target loongbones_skeleton_import_smoke`；`<build>/tools/skeleton-import-smoke/loongbones_skeleton_import_smoke "$LOONGBONES_CORPUS_ROOT"` |
 | 输入 | 语料根目录（**只读**），由 `$LOONGBONES_CORPUS_ROOT` 或首参数提供 |
-| 输出 | prepare 成功 / 失败、完整提交数、落盘资源文件数、region 附件数、降级 / 未命中、不支持能力账本、诊断码分布，以及重开后的对象计数摘要 |
+| 输出 | prepare 成功 / 失败、完整提交数、落盘资源文件数、region 附件数、降级 / 未命中、不支持能力账本、诊断码分布，以及重开后的对象计数摘要；**Task 5 B5 起**追加 `[deep-compare]` 逐项语义比对行（`items` / `maxResidual` / `mismatches`），覆盖第二批字段：mesh 的 `uvs` / `vertices`（容差）与 `triangles`（精确）、加权 `vertexBindings` 的 `boneId`（精确）与 `x` / `y` / `weight`（容差、**D30 原值**不归一化）、linked 的 `parentKey.{slotId, attachmentName}` 与 `inheritDeform`、IK 的 `boneIds` / `targetBoneId` / `enabled`（D35）/ `bendPositive` / `mix`、transform 的 4×mix + 6×offset（D36 原值）。`mismatches > 0` 判重开不一致（退出码 5） |
 | 依赖 | C++17、CMake、MinGW-w64 |
 | 可安全重跑 | 是；语料只读，写入只发生在 `--project` 指定的暂存目录，结束即清理 |
 | 退出码 | **只有 0 可作验收证据**。0=端到端闭合通过；2=无语料根；3=根下无 `.skel.bytes`；4=无有效候选；5=提交/重开不一致；6=存在 error 级诊断；7=失败全部属共享图集布局的已知缺口 |
-| 当前基线 | 1113 个单位，prepare 成功 1111（2 个共享图集布局缺同名图集），**region 未命中 0**，完整提交 + 重开 8/8 一致 |
+| 当前基线 | 1113 个单位，prepare 成功 1111（2 个共享图集布局缺同名图集），**region 未命中 0**，完整提交 + 重开 8/8 一致；**B5（2026-10-23 验收）**：`[deep-compare] items=18067 maxResidual=0 mismatches=0` —— 8 个真实样本共 18,067 项逐项比对全部一致，native 的 double 文本往返**精确**（残差 0，非近似）。注意：本工具当前退出码 **7**（共享图集已知缺口），按「只有 0 可作验收证据」**不得**据此宣称端到端闭环通过；`[deep-compare]` 结论与之分开陈述 |
 
 ### 2.13 `tools/format-tests/` — 原生格式 codec 自动化测试
 

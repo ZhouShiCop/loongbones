@@ -41,6 +41,8 @@ enum class OwnerKind {
   kSlot,       ///< Slot（稳定 ID）
   kSkin,       ///< Skin（稳定 ID）
   kSkinEntry,  ///< SkinEntry（稳定 ID）
+  kIkConstraint,         ///< Task 5 B2：IkConstraint（稳定 ID、骨架级对象）
+  kTransformConstraint,  ///< Task 5 B2：TransformConstraint（稳定 ID、骨架级对象）
                 ///  Attachment **没有**独立 OwnerKind：与 SkinEntry 1:1 内嵌，
                 ///  锚点 = (kSkinEntry, entryId) + "/attachment"（v2 schema §5.2）。
 };
@@ -81,6 +83,7 @@ enum class SourceFormatVersion {
   kUnknown = 0,
   kV1 = 1,  ///< 磁盘上是 v1；内存中已被迁移为 v2 结构
   kV2 = 2,
+  kV3 = 3,  ///< Task 5 B2：磁盘上是 v3；v2 读入后亦被迁移为 v3 结构
 };
 
 struct ProjectDocument {
@@ -92,8 +95,10 @@ struct ProjectDocument {
   std::vector<std::string> optionalCapabilities;
 
   /// 读入时的文档版本（B3 第 1 条：文档版本状态）。
-  /// 默认 kV2 —— 新建文档（createProjectDocument）直接是 v2。
-  SourceFormatVersion sourceVersion = SourceFormatVersion::kV2;
+  /// 默认 kV3 —— 新建文档（createProjectDocument）直接是 v3。
+  /// （Task 5：写出统一为 v3 ⇒ 新建 / 导入产出的文档一律标 kV3，不得再标 kV2，
+  ///  否则「内存标记为 v2、落盘却是 v3」语义不自洽。）
+  SourceFormatVersion sourceVersion = SourceFormatVersion::kV3;
 };
 
 }  // namespace format

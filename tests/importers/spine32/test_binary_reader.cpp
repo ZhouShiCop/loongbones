@@ -373,7 +373,16 @@ TEST(BinaryReader, MeshAttachmentTraversed) {
     w.varint(0);                                   // hull
   }));
   CHECK(r.ok);
-  CHECK_EQ(r.skeleton.unsupported.mesh, std::size_t{1});
+  // Task 5 B3：mesh 不再是「不支持」，而是**真实解析**进 IR。
+  const auto& att = r.skeleton.skins[0].slots[0].attachments[0];
+  CHECK(att.mesh.has_value());
+  CHECK(att.weightedMesh.has_value() == false);
+  if (att.mesh.has_value()) {
+    CHECK_EQ(att.mesh->uvs.size(), std::size_t{4});
+    CHECK_EQ(att.mesh->triangles.size(), std::size_t{3});
+    CHECK_EQ(att.mesh->vertices.size(), std::size_t{4});
+    CHECK_EQ(att.mesh->triangles[2], std::uint16_t{2});
+  }
 }
 
 TEST(BinaryReader, WeightedMeshAttachmentTraversed) {
@@ -394,7 +403,17 @@ TEST(BinaryReader, WeightedMeshAttachmentTraversed) {
     w.varint(0);                                   // hull
   }));
   CHECK(r.ok);
-  CHECK_EQ(r.skeleton.unsupported.weightedMesh, std::size_t{1});
+  // Task 5 B3：加权 mesh 真实解析；**权重保留源原值**（D30），boneIndex 是 float 编码的整数。
+  const auto& att = r.skeleton.skins[0].slots[0].attachments[0];
+  CHECK(att.weightedMesh.has_value());
+  if (att.weightedMesh.has_value()) {
+    CHECK_EQ(att.weightedMesh->vertexBindings.size(), std::size_t{2});
+    CHECK_EQ(att.weightedMesh->vertexBindings[0].size(), std::size_t{2});
+    CHECK_EQ(att.weightedMesh->vertexBindings[0][0].boneIndex, 0);
+    CHECK_EQ(att.weightedMesh->vertexBindings[0][1].boneIndex, 1);
+    CHECK_EQ(att.weightedMesh->vertexBindings[0][0].weight, 0.5);
+    CHECK_EQ(att.weightedMesh->vertexBindings[1].size(), std::size_t{1});
+  }
 }
 
 TEST(BinaryReader, WeightedMeshBadBoneCountRejected) {
@@ -487,4 +506,298 @@ TEST(BinaryReader, ResultCodeStringsAreStable) {
   std::sort(seen.begin(), seen.end());
   CHECK(std::adjacent_find(seen.begin(), seen.end()) == seen.end());
   CHECK_EQ(seen.front(), std::string{"COUNT_LIMIT"});
+}
+
+// =====================================================================
+// Task 5 B3：合成 fixture 接入**产品 Reader**（16 个 fixture 的字节级 golden）
+//
+// golden 来源：docs/skeleton/fixtures/README.md §2。
+// 这组断言把「fixture 提供了什么字节」与「产品 Reader 实际读出了什么」钉在一起 ——
+// 旧参照 Reader 只能作结构参照，**不能**替代产品行为（README §2 已声明）。
+// =====================================================================
+
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+
+namespace {
+
+/// 读取合成 fixture 的字节（目录在构建时注入，测试不依赖当前工作目录）。
+std::vector<std::uint8_t> loadFixture(const std::string& name) {
+  const std::filesystem::path path =
+      std::filesystem::path(LOONGBONES_FIXTURE_DIR) / (name + ".skel.bytes");
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return {};
+  return std::vector<std::uint8_t>((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+}
+
+/// float32 → double 的比较容差（源值是 float32，不能用精确相等）。
+bool near(double a, double b) { return std::fabs(a - b) < 1e-6; }
+
+}  // namespace
+
+TEST(BinaryReader, Fixture01MinimalParsed) {
+  const ReadResult r = readSkeletonBinary32(loadFixture("01-minimal"));
+  CHECK(r.ok);
+  CHECK_EQ(r.skeleton.bones.size(), std::size_t{1});
+  CHECK_EQ(r.skeleton.slots.size(), std::size_t{1});
+  CHECK_EQ(r.skeleton.skins.size(), std::size_t{1});
+  CHECK_EQ(r.skeleton.skins[0].slots[0].attachments.size(), std::size_t{1});
+}
+
+TEST(BinaryReader, Fixture02NestedSlotsRegionsParsed) {
+  const ReadResult r = readSkeletonBinary32(loadFixture("02-nested-slots-regions"));
+  CHECK(r.ok);
+  CHECK_EQ(r.skeleton.bones.size(), std::size_t{4});
+  CHECK_EQ(r.skeleton.slots.size(), std::size_t{3});
+  CHECK_EQ(r.skeleton.skins[0].slots.size(), std::size_t{3});
+}
+
+TEST(BinaryReader, Fixture03BadParentIndexRejected) {
+  // 产品 Reader **必须拒绝**越界父索引（旧宽松 Reader 只记 warning）。
+  expectFail(loadFixture("03-bad-parent-index"), ReadCode::kIndexOutOfRange, "父索引越界");
+}
+
+TEST(BinaryReader, Fixture04TruncatedRejected) {
+  expectFail(loadFixture("04-truncated"), ReadCode::kTruncated, "截断");
+}
+
+TEST(BinaryReader, Fixture05NonFiniteFloatRejected) {
+  expectFail(loadFixture("05-non-finite-float"), ReadCode::kNonFiniteFloat, "非有限浮点");
+}
+
+TEST(BinaryReader, Fixture06MinimalMeshParsed) {
+  const ReadResult r = readSkeletonBinary32(loadFixture("06-minimal-mesh"));
+  CHECK(r.ok);
+  const auto& atts = r.skeleton.skins[0].slots[0].attachments;
+  CHECK_EQ(atts.size(), std::size_t{1});
+  CHECK(atts[0].mesh.has_value());
+  if (atts[0].mesh.has_value()) {
+    const auto& m = *atts[0].mesh;
+    CHECK_EQ(m.uvs.size(), std::size_t{6});
+    CHECK_EQ(m.triangles.size(), std::size_t{3});
+    CHECK_EQ(m.triangles[2], std::uint16_t{2});
+    CHECK_EQ(m.vertices.size(), std::size_t{6});
+    CHECK(near(m.vertices[2], 32.0));
+    CHECK(near(m.vertices[5], 32.0));
+    CHECK(near(m.width, 32.0));
+    CHECK(near(m.height, 32.0));
+  }
+}
+
+TEST(BinaryReader, Fixture07WeightedMeshParsedWithNegativeWeight) {
+  const ReadResult r = readSkeletonBinary32(loadFixture("07-weighted-mesh"));
+  CHECK(r.ok);
+  const auto& atts = r.skeleton.skins[0].slots[0].attachments;
+  CHECK_EQ(atts.size(), std::size_t{1});
+  CHECK(atts[0].weightedMesh.has_value());
+  if (atts[0].weightedMesh.has_value()) {
+    const auto& wm = *atts[0].weightedMesh;
+    CHECK_EQ(wm.vertexBindings.size(), std::size_t{3});
+    CHECK_EQ(wm.vertexBindings[0].size(), std::size_t{2});
+    // 权重**保留源原值**：1.2 与 -0.2 都不归一化、不拒绝（D30 / D34）
+    CHECK(near(wm.vertexBindings[0][0].weight, 1.2));
+    CHECK(near(wm.vertexBindings[0][1].weight, -0.2));
+    CHECK_EQ(wm.vertexBindings[0][0].boneIndex, 1);
+    CHECK_EQ(wm.vertexBindings[0][1].boneIndex, 0);
+  }
+}
+
+TEST(BinaryReader, Fixture08LinkedMeshExplicitParentSkinParsed) {
+  const ReadResult r = readSkeletonBinary32(loadFixture("08-linked-mesh"));
+  CHECK(r.ok);
+  const auto& atts = r.skeleton.skins[0].slots[0].attachments;
+  CHECK_EQ(atts.size(), std::size_t{3});
+  CHECK(atts[0].mesh.has_value());
+  CHECK(atts[1].linkedMesh.has_value());
+  if (atts[1].linkedMesh.has_value()) {
+    CHECK_EQ(atts[1].linkedMesh->parent, std::string{"body_mesh"});
+    CHECK(atts[1].linkedMesh->parentSkin.has_value());
+    CHECK_EQ(*atts[1].linkedMesh->parentSkin, std::string{"default"});
+    CHECK(atts[1].linkedMesh->inheritDeform);
+  }
+  CHECK(atts[2].linkedMesh.has_value());
+  if (atts[2].linkedMesh.has_value()) {
+    CHECK(!atts[2].linkedMesh->inheritDeform);
+  }
+}
+
+TEST(BinaryReader, Fixture09BadTriangleParsedButIndexIsOutOfRange) {
+  // 字节层合法（索引是 u16），**越界由 Domain 判** MESH_TRIANGLE_INDEX_OUT_OF_RANGE。
+  const ReadResult r = readSkeletonBinary32(loadFixture("09-mesh-bad-triangle"));
+  CHECK(r.ok);
+  const auto& atts = r.skeleton.skins[0].slots[0].attachments;
+  CHECK(atts[0].mesh.has_value());
+  if (atts[0].mesh.has_value()) {
+    CHECK_EQ(atts[0].mesh->triangles.size(), std::size_t{3});
+    CHECK_EQ(atts[0].mesh->triangles[2], std::uint16_t{9});
+  }
+}
+
+TEST(BinaryReader, Fixture10BadBoneIndexParsedButUnresolved) {
+  const ReadResult r = readSkeletonBinary32(loadFixture("10-mesh-bad-bone-index"));
+  CHECK(r.ok);
+  const auto& atts = r.skeleton.skins[0].slots[0].attachments;
+  CHECK(atts[0].weightedMesh.has_value());
+  if (atts[0].weightedMesh.has_value()) {
+    CHECK_EQ(atts[0].weightedMesh->vertexBindings[0][0].boneIndex, 7);
+  }
+}
+
+TEST(BinaryReader, Fixture11ConstraintsParsed) {
+  const ReadResult r = readSkeletonBinary32(loadFixture("11-constraints"));
+  CHECK(r.ok);
+  CHECK_EQ(r.skeleton.ikConstraints.size(), std::size_t{1});
+  if (!r.skeleton.ikConstraints.empty()) {
+    const auto& c = r.skeleton.ikConstraints[0];
+    CHECK_EQ(c.name, std::string{"leg-ik"});
+    CHECK_EQ(c.boneIndices.size(), std::size_t{1});
+    CHECK_EQ(c.targetIndex, 0);
+    CHECK(near(c.mix, 1.0));
+    CHECK(c.bendPositive);
+  }
+  CHECK_EQ(r.skeleton.transformConstraints.size(), std::size_t{1});
+  if (!r.skeleton.transformConstraints.empty()) {
+    const auto& c = r.skeleton.transformConstraints[0];
+    CHECK_EQ(c.name, std::string{"copy-tr"});
+    CHECK_EQ(c.boneIndex, 1);
+    CHECK(near(c.rotateMix, 90.0));
+    CHECK(near(c.offsetY, 1.0));
+    CHECK(near(c.offsetScaleX, 0.5));
+  }
+}
+
+TEST(BinaryReader, Fixture12WeightSumZeroParsed) {
+  const ReadResult r = readSkeletonBinary32(loadFixture("12-mesh-bad-weight-sum-zero"));
+  CHECK(r.ok);
+  const auto& atts = r.skeleton.skins[0].slots[0].attachments;
+  CHECK(atts[0].weightedMesh.has_value());
+  if (atts[0].weightedMesh.has_value()) {
+    const auto& wm = *atts[0].weightedMesh;
+    CHECK_EQ(wm.vertexBindings.size(), std::size_t{3});
+    CHECK_EQ(wm.vertexBindings[0].size(), std::size_t{2});
+    CHECK(near(wm.vertexBindings[0][0].weight, 0.0));
+    CHECK(near(wm.vertexBindings[0][1].weight, 0.0));
+  }
+}
+
+TEST(BinaryReader, Fixture13WeightSumNegativeParsed) {
+  const ReadResult r = readSkeletonBinary32(loadFixture("13-mesh-bad-weight-sum-negative"));
+  CHECK(r.ok);
+  const auto& atts = r.skeleton.skins[0].slots[0].attachments;
+  CHECK(atts[0].weightedMesh.has_value());
+  if (atts[0].weightedMesh.has_value()) {
+    const auto& wm = *atts[0].weightedMesh;
+    CHECK(near(wm.vertexBindings[0][0].weight, -0.5));
+    CHECK(near(wm.vertexBindings[0][1].weight, -0.2));
+  }
+}
+
+TEST(BinaryReader, Fixture14LinkedMeshImplicitParentSkinParsed) {
+  // D38 的第二条路径：类型 5 + `parentSkin = null` ⇒ 父在**同皮肤**内。
+  const ReadResult r = readSkeletonBinary32(loadFixture("14-linked-mesh-implicit-skin"));
+  CHECK(r.ok);
+  const auto& atts = r.skeleton.skins[0].slots[0].attachments;
+  CHECK_EQ(atts.size(), std::size_t{3});
+  CHECK(atts[0].weightedMesh.has_value());
+  CHECK(atts[1].linkedMesh.has_value());
+  if (atts[1].linkedMesh.has_value()) {
+    CHECK(!atts[1].linkedMesh->parentSkin.has_value());  // null ⇒ 同皮肤
+    CHECK_EQ(atts[1].linkedMesh->parent, std::string{"body_wmesh"});
+    CHECK(atts[1].linkedMesh->inheritDeform);
+  }
+  CHECK(atts[2].linkedMesh.has_value());
+  if (atts[2].linkedMesh.has_value()) {
+    CHECK(!atts[2].linkedMesh->inheritDeform);
+  }
+}
+
+TEST(BinaryReader, Fixture15IkMixZeroParsed) {
+  const ReadResult r = readSkeletonBinary32(loadFixture("15-ik-mix-zero"));
+  CHECK(r.ok);
+  CHECK_EQ(r.skeleton.ikConstraints.size(), std::size_t{1});
+  if (!r.skeleton.ikConstraints.empty()) {
+    const auto& c = r.skeleton.ikConstraints[0];
+    CHECK_EQ(c.name, std::string{"leg-ik-off"});
+    CHECK(near(c.mix, 0.0));  // 原值保留（D35：enabled 由 mix 推导，不丢原值）
+    CHECK(!c.bendPositive);
+  }
+}
+
+TEST(BinaryReader, Fixture16PlainMeshParsedWithoutWidthHeight) {
+  // nonessential = 0（语料 1109/1113 的主流形态）：无 edges / width / height，**不得臆造**。
+  const ReadResult r = readSkeletonBinary32(loadFixture("16-minimal-mesh-plain"));
+  CHECK(r.ok);
+  const auto& atts = r.skeleton.skins[0].slots[0].attachments;
+  CHECK_EQ(atts.size(), std::size_t{1});
+  CHECK(atts[0].mesh.has_value());
+  if (atts[0].mesh.has_value()) {
+    const auto& m = *atts[0].mesh;
+    CHECK_EQ(m.uvs.size(), std::size_t{6});
+    CHECK_EQ(m.triangles.size(), std::size_t{3});
+    CHECK_EQ(m.vertices.size(), std::size_t{6});
+    CHECK(near(m.width, 0.0));
+    CHECK(near(m.height, 0.0));
+  }
+}
+
+TEST(BinaryReader, Fixture07WeightedMeshCarriesUvsAndTriangles) {
+  const ReadResult r = readSkeletonBinary32(loadFixture("07-weighted-mesh"));
+  CHECK(r.ok);
+  const auto& atts = r.skeleton.skins[0].slots[0].attachments;
+  CHECK(atts[0].weightedMesh.has_value());
+  if (atts[0].weightedMesh.has_value()) {
+    const auto& wm = *atts[0].weightedMesh;
+    CHECK_EQ(wm.uvs.size(), std::size_t{6});
+    CHECK_EQ(wm.triangles.size(), std::size_t{3});
+    CHECK_EQ(wm.triangles[2], std::uint16_t{2});
+  }
+}
+
+TEST(BinaryReader, Fixture08LinkedMeshCarriesWidthAndHeight) {
+  const ReadResult r = readSkeletonBinary32(loadFixture("08-linked-mesh"));
+  CHECK(r.ok);
+  const auto& atts = r.skeleton.skins[0].slots[0].attachments;
+  CHECK(atts[1].linkedMesh.has_value());
+  if (atts[1].linkedMesh.has_value()) {
+    CHECK(near(atts[1].linkedMesh->width, 32.0));
+    CHECK(near(atts[1].linkedMesh->height, 32.0));
+  }
+}
+
+TEST(BinaryReader, Fixture11TransformConstraintCarriesAllMixesAndOffsets) {
+  const ReadResult r = readSkeletonBinary32(loadFixture("11-constraints"));
+  CHECK(r.ok);
+  CHECK_EQ(r.skeleton.transformConstraints.size(), std::size_t{1});
+  if (!r.skeleton.transformConstraints.empty()) {
+    const auto& c = r.skeleton.transformConstraints[0];
+    CHECK(near(c.rotateMix, 90.0));
+    CHECK(near(c.translateMix, 0.0));
+    CHECK(near(c.scaleMix, 0.0));
+    CHECK(near(c.shearMix, 0.0));
+    CHECK(near(c.offsetRotation, 0.0));
+    CHECK(near(c.offsetX, 0.0));
+    CHECK(near(c.offsetY, 1.0));
+    CHECK(near(c.offsetScaleX, 0.5));
+    CHECK(near(c.offsetScaleY, 1.0));
+    CHECK(near(c.offsetShearY, 0.0));
+  }
+}
+
+TEST(BinaryReader, Fixture12OtherVerticesKeepValidWeightSums) {
+  // 只有**顶点 0** 的权重和为 0（畸形样本）；顶点 1 / 2 必须是正常的 1.0。
+  const ReadResult r = readSkeletonBinary32(loadFixture("12-mesh-bad-weight-sum-zero"));
+  CHECK(r.ok);
+  const auto& atts = r.skeleton.skins[0].slots[0].attachments;
+  CHECK(atts[0].weightedMesh.has_value());
+  if (atts[0].weightedMesh.has_value()) {
+    const auto& wm = *atts[0].weightedMesh;
+    double sum1 = 0.0;
+    for (const auto& b : wm.vertexBindings[1]) sum1 += b.weight;
+    double sum2 = 0.0;
+    for (const auto& b : wm.vertexBindings[2]) sum2 += b.weight;
+    CHECK(near(sum1, 1.0));
+    CHECK(near(sum2, 1.0));
+  }
 }

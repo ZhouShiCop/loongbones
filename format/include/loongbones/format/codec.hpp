@@ -17,13 +17,14 @@
 namespace loongbones {
 namespace format {
 
-/// 写出格式的版本（RFC §5.1；Task 4 B3 起统一为 v2）
-constexpr int kFormatVersion = 2;
-/// 本 Reader 能读取的最高格式版本（RFC §1.1）：同时接受 v1 与 v2
-constexpr int kReaderMaxVersion = 2;
+/// 写出格式的版本（RFC §5.1；Task 4 B3 起为 v2，**Task 5 B2 起统一为 v3**）
+constexpr int kFormatVersion = 3;
+/// 本 Reader 能读取的最高格式版本（RFC §1.1）：同时接受 v1 / v2 / v3
+constexpr int kReaderMaxVersion = 3;
 /// 本 Reader 能读取的最低格式版本：v1 仍可读入后迁移
 constexpr int kReaderMinVersion = 1;
 constexpr int kLegacyV1Version = 1;
+constexpr int kLegacyV2Version = 2;
 constexpr const char* kFormatId = "loongbones.native-project";
 
 /// v1 基线自带的能力，无需列入 capabilities.required（RFC §1.2）
@@ -69,11 +70,26 @@ LoadResult decodeDocument(const std::string& text, const ReaderLimits& limits);
 /// 只做三件事：
 ///   1. 确保 `data.skeletons` 存在（v1 没有该集合，故为空数组）；
 ///   2. 设置 v2 的能力字段（`capabilities.required` 含 kSkeletonCapability）；
-///   3. 标记 `sourceVersion = kV1`。
+///   3. **不改** `sourceVersion`（它表示「磁盘上读入时的版本」：读入 v1 时已由解码器
+///      置为 kV1，迁移本身不改它，好让上层知道「这次是迁移而来的、尚未落盘」）。
 ///
 /// 不生成任何 ID、不改写任何既有字段（含未知字段与 optional 能力）、不碰磁盘。
 /// 幂等：对已是 v2 的文档调用不产生任何变化。
 void migrateV1ToV2(ProjectDocument& document);
+
+/// 把 v2 文档**纯函数地**迁移为内存中的 v3 文档（Task 5 B2）。
+///
+/// 只做两件事：
+///   1. 确保每个骨架的 `ikConstraints` / `transformConstraints` 存在（v2 无此二键，
+///      故结果为空数组）；
+///   2. 标记 `sourceVersion = kV3`。
+///
+/// 不生成任何 ID、不改写任何既有字段（附件、未知字段、能力集合）与不碰磁盘。
+/// 幂等：对已是 v3 的文档调用不产生任何变化。
+///
+/// 注意：v3 相对 v2 是**结构增量**，附件逐个不改（v2 只有 region，无需迁移），
+/// 故 Disk 上的 v2 文档读入后与本函数结果完全一致。
+void migrateV2ToV3(ProjectDocument& document);
 
 /// 把 ProjectDocument 编码为确定性 JSON 文本（RFC §4.5）。
 /// 已知数值按类型化值重新序列化；未知数值**逐字节回写原始字面量**（RFC §6.6）。

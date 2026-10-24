@@ -50,6 +50,28 @@ cmake --build <build> --target loongbones_skeleton_import_smoke
 7 与 6 分开是为了让"语料布局特例"和"代码/数据真的有问题"不被混为一谈；
 两者都**不是**通过。
 
+### 逐项语义比对（Task 5 B5）
+
+B6 起本工具只比对**对象数**；B5 起在重开验证里追加**逐项**比对，覆盖第二批字段：
+
+- 附件：`type` 分支一致；`uvs` / `vertices`（容差）、`triangles`（精确）、
+  加权 `vertexBindings` 的 `boneId`（精确）与 `x` / `y` / `weight`（容差，权重按 D30 原值比对）、
+  linked 的 `parentKey.{slotId, attachmentName}` 与 `inheritDeform`；
+- 约束：IK 的 `id` / `name` / `boneIds` / `targetBoneId` / `enabled`（D35）/ `bendPositive` / `mix`；
+  transform 的 4×mix + 6×offset（D36 原值）。
+
+输出一行**统计量**（ASCII 前缀，便于管道取证）：
+
+```
+[deep-compare] items=<比对项数> maxResidual=<最大浮点残差> mismatches=<不一致项数>
+```
+
+`mismatches > 0` 时重开判定为不一致（退出码 5）。实测（2026-10-23，语料 8 个完整提交单位）：
+`items=18067 maxResidual=0 mismatches=0` —— native 的 double 文本往返是**精确**的，不是近似。
+
+> 注意：退出码 7（共享图集缺口，Task 6）的路径**在重开验证之后**打印，
+> 但会先于结论返回 ⇒ 该路径下不会给出"端到端闭合通过"的判语，不得据退出码 7 宣称闭环通过。
+
 ## 它验证什么
 
 1. **注册表**：`registerBuiltinPlugins()` 之后能用 `spine.binary@3.2.01` 找到插件；

@@ -60,6 +60,17 @@ const char* toString(DiagnosticCode code) noexcept {
     case DiagnosticCode::kSkeletonAtlasNotFound: return "SKELETON_ATLAS_NOT_FOUND";
     case DiagnosticCode::kSkeletonValueNotFinite: return "SKELETON_VALUE_NOT_FINITE";
     case DiagnosticCode::kSkeletonSourceRefInvalid: return "SKELETON_SOURCE_REF_INVALID";
+
+    // ---- 骨架第二批（Task 5 B1）----
+    case DiagnosticCode::kMeshTriangleIndexOutOfRange: return "MESH_TRIANGLE_INDEX_OUT_OF_RANGE";
+    case DiagnosticCode::kMeshVertexGeometryInvalid: return "MESH_VERTEX_GEOMETRY_INVALID";
+    case DiagnosticCode::kMeshUvOutOfRange: return "MESH_UV_OUT_OF_RANGE";
+    case DiagnosticCode::kMeshLinkedParentUnresolved: return "MESH_LINKED_PARENT_UNRESOLVED";
+    case DiagnosticCode::kMeshWeightSumInvalid: return "MESH_WEIGHT_SUM_INVALID";
+    case DiagnosticCode::kMeshWeightBoneUnresolved: return "MESH_WEIGHT_BONE_UNRESOLVED";
+    case DiagnosticCode::kMeshBindingCountInvalid: return "MESH_BINDING_COUNT_INVALID";
+    case DiagnosticCode::kConstraintTargetUnresolved: return "CONSTRAINT_TARGET_UNRESOLVED";
+    case DiagnosticCode::kConstraintChainEmpty: return "CONSTRAINT_CHAIN_EMPTY";
   }
   return "UNKNOWN";
 }

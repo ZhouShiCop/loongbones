@@ -111,6 +111,35 @@
     "16-minimal-mesh-plain.atlas.txt",
     "16-minimal-mesh-plain.png"
    ]
+  },
+  {
+   "fixture": "17-shared-atlas",
+   "files": [
+    "17-shared-atlas/pair/hub/pair_hub_left.skel.bytes",
+    "17-shared-atlas/pair/hub/pair_hub_right.skel.bytes",
+    "17-shared-atlas/pair/hub/pair_hub.atlas.txt",
+    "17-shared-atlas/pair/hub/pair_hub.png"
+   ]
+  },
+  {
+   "fixture": "18-ambiguous-atlas",
+   "files": [
+    "18-ambiguous-atlas/amb/duo/duo_unit.skel.bytes",
+    "18-ambiguous-atlas/amb/duo/duo_alpha.atlas.txt",
+    "18-ambiguous-atlas/amb/duo/duo_beta.atlas.txt",
+    "18-ambiguous-atlas/amb/duo/duo_alpha.png",
+    "18-ambiguous-atlas/amb/duo/duo_beta.png"
+   ]
+  },
+  {
+   "fixture": "19-multi-atlas-same-name",
+   "files": [
+    "19-multi-atlas-same-name/multi/pick/pick_unit.skel.bytes",
+    "19-multi-atlas-same-name/multi/pick/pick_unit.atlas.txt",
+    "19-multi-atlas-same-name/multi/pick/pick_unit.png",
+    "19-multi-atlas-same-name/multi/pick/decoy.atlas.txt",
+    "19-multi-atlas-same-name/multi/pick/decoy.png"
+   ]
   }
  ]
 }

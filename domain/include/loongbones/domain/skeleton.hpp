@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "loongbones/domain/atlas.hpp"
@@ -32,6 +33,8 @@ using BoneId = Id;
 using SlotId = Id;
 using SkinId = Id;
 using SkinEntryId = Id;
+using IkConstraintId = Id;         ///< Task 5 B1：约束是骨架级对象，有稳定 ID
+using TransformConstraintId = Id;  ///< Task 5 B1
 
 /// 各自种类的 ID 构造器，保证强类型区分（不会把 NodeId 当成 BoneId 用）。
 inline SkeletonId newSkeletonId() { return Id::generate(IdKind::Skeleton); }
@@ -39,6 +42,10 @@ inline BoneId newBoneId() { return Id::generate(IdKind::Bone); }
 inline SlotId newSlotId() { return Id::generate(IdKind::Slot); }
 inline SkinId newSkinId() { return Id::generate(IdKind::Skin); }
 inline SkinEntryId newSkinEntryId() { return Id::generate(IdKind::SkinEntry); }
+inline IkConstraintId newIkConstraintId() { return Id::generate(IdKind::IkConstraint); }
+inline TransformConstraintId newTransformConstraintId() {
+  return Id::generate(IdKind::TransformConstraint);
+}
 
 /// 插槽混合模式。枚举字符串契约见 v2 schema §3.3（Format 层负责编解码）。
 enum class BlendMode {
@@ -125,17 +132,150 @@ struct RegionAttachment {
   double width = 0.0;
   double height = 0.0;
   ColorF color;
+
+  friend bool operator==(const RegionAttachment& a, const RegionAttachment& b) noexcept {
+    return a.regionId == b.regionId && a.x == b.x && a.y == b.y &&
+           a.rotationDeg == b.rotationDeg && a.scaleX == b.scaleX && a.scaleY == b.scaleY &&
+           a.width == b.width && a.height == b.height && a.color == b.color;
+  }
+  friend bool operator!=(const RegionAttachment& a, const RegionAttachment& b) noexcept {
+    return !(a == b);
+  }
 };
 
 /// 皮肤条目：(Slot, 附件名) → 附件。
 ///
 /// **必须有稳定 ID**：entries 是可重排数组；无 ID 时未知字段锚点会退化成
 /// 数组下标，违反 D22（v2 schema §5.3）。
+/// ---- 第二批：mesh / 蒙皮 / linked（Task 5 B1）----
+/// 契约：docs/skeleton/mesh-and-constraint-rfc.md。纪律：**只增不改** ——
+/// RegionAttachment 的语义与字段不变，第二批类型是并列新增。
+///
+/// 顶点空间（A1 对照实验，N2 维持）：
+///   · 非加权 mesh 的 vertices ＝ **槽骨骼局部坐标**；
+///   · 加权 mesh 每条绑定 (x, y) ＝ **该骨骼自己的局部坐标**（各条变换到骨架空间后重合）。
+/// 二者都不是骨架空间坐标，混用会「动画一播就散」。
+
+/// 非加权 mesh 附件。
+struct MeshAttachment {
+  AtlasRegionId regionId;
+  std::vector<double> uvs;               ///< 2×顶点数；regionUVs，取值 0..1（N3）
+  std::vector<std::uint32_t> triangles;  ///< 顶点索引，每个须 < 顶点数
+  std::vector<double> vertices;          ///< 2×顶点数，xy 成对
+  /// 仅编辑器可视辅助（源 nonessential 段）；不参与求值。
+  double width = 0.0;
+  double height = 0.0;
+
+  friend bool operator==(const MeshAttachment& a, const MeshAttachment& b) noexcept {
+    return a.regionId == b.regionId && a.uvs == b.uvs && a.triangles == b.triangles &&
+           a.vertices == b.vertices && a.width == b.width && a.height == b.height;
+  }
+  friend bool operator!=(const MeshAttachment& a, const MeshAttachment& b) noexcept {
+    return !(a == b);
+  }
+};
+
+/// 一个顶点对一根骨骼的绑定。
+struct VertexBinding {
+  BoneId boneId;
+  double x = 0.0;  ///< 该骨骼局部坐标
+  double y = 0.0;
+  /// **源原值**：导入期不归一化、不舍入（D30）；**可为负**，负权重合法且语义为
+  /// 「该绑定对顶点无影响」（D34）。合法性判据是**权重和**（D37），不是单条符号。
+  double weight = 0.0;
+
+  friend bool operator==(const VertexBinding& a, const VertexBinding& b) noexcept {
+    return a.boneId == b.boneId && a.x == b.x && a.y == b.y && a.weight == b.weight;
+  }
+  friend bool operator!=(const VertexBinding& a, const VertexBinding& b) noexcept {
+    return !(a == b);
+  }
+};
+
+/// 加权 mesh 附件。几何不落 x/y（只在绑定里），顶点数 = vertexBindings.size()。
+struct WeightedMeshAttachment {
+  AtlasRegionId regionId;
+  std::vector<double> uvs;               ///< 2×顶点数
+  std::vector<std::uint32_t> triangles;  ///< 顶点索引，每个须 < 顶点数
+  std::vector<std::vector<VertexBinding>> vertexBindings;  ///< 外层下标 = 顶点
+  double width = 0.0;
+  double height = 0.0;
+
+  friend bool operator==(const WeightedMeshAttachment& a,
+                         const WeightedMeshAttachment& b) noexcept {
+    return a.regionId == b.regionId && a.uvs == b.uvs && a.triangles == b.triangles &&
+           a.vertexBindings == b.vertexBindings && a.width == b.width && a.height == b.height;
+  }
+  friend bool operator!=(const WeightedMeshAttachment& a,
+                         const WeightedMeshAttachment& b) noexcept {
+    return !(a == b);
+  }
+};
+
+/// linked mesh：**不复制几何**，用 (parentSlotId, parentAttachmentName) 引用父附件。
+/// 父可以是 mesh 或 weightedMesh；父皮肤缺省为同皮肤（D38 两条路径都支持）。
+struct LinkedMeshAttachment {
+  AtlasRegionId regionId;
+  SlotId parentSlotId;
+  std::string parentAttachmentName;
+  bool inheritDeform = false;  ///< true = 跟随父附件的 deform
+
+  friend bool operator==(const LinkedMeshAttachment& a, const LinkedMeshAttachment& b) noexcept {
+    return a.regionId == b.regionId && a.parentSlotId == b.parentSlotId &&
+           a.parentAttachmentName == b.parentAttachmentName && a.inheritDeform == b.inheritDeform;
+  }
+  friend bool operator!=(const LinkedMeshAttachment& a, const LinkedMeshAttachment& b) noexcept {
+    return !(a == b);
+  }
+};
+
+/// 附件：SkinEntry 的**内嵌值对象**，不单独分配 ID（D25 / v2 schema §5.3）。
+using Attachment = std::variant<RegionAttachment, MeshAttachment, WeightedMeshAttachment,
+                                LinkedMeshAttachment>;
+
+/// BoundingBox：**只留类型占位，不实现**（D32）。
+/// 解析到该类型时产出「不支持 + 待验证」诊断，不建对象、不留半成品，
+/// 因此它**不进入** Attachment 变体。
+struct BoundingBoxAttachment {};
+
+/// IK 约束（骨架级对象，有稳定 ID）。
+struct IkConstraint {
+  IkConstraintId id;
+  std::string name;
+  std::vector<BoneId> boneIds;  ///< **有序链**，至少 1 根
+  BoneId targetBoneId;
+  double mix = 0.0;             ///< 源原值，不解释
+  bool enabled = false;         ///< 是否开启（mix != 0，D35）
+  bool bendPositive = true;
+};
+
+/// Transform 约束（骨架级对象，有稳定 ID）。
+///
+/// 4×mix + 6×offset **原值承载、不解释语义**（D36）：语料 mix 越出 [0,1] 且从未取到 1，
+/// 与 Spine 3.5+ 的「0..1 插值因子」语义相悖；求值器在 V3 时基取证完成前**不得**读取
+/// 这些字段做计算。
+struct TransformConstraint {
+  TransformConstraintId id;
+  std::string name;
+  BoneId boneId;        ///< 受约束骨
+  BoneId targetBoneId;  ///< 目标骨
+  double rotateMix = 0.0;
+  double translateMix = 0.0;
+  double scaleMix = 0.0;
+  double shearMix = 0.0;
+  double offsetRotation = 0.0;
+  double offsetX = 0.0;
+  double offsetY = 0.0;
+  double offsetScaleX = 0.0;
+  double offsetScaleY = 0.0;
+  double offsetShearY = 0.0;
+};
+
 struct SkinEntry {
   SkinEntryId id;
   SlotId slotId;
   std::string attachmentName;
-  RegionAttachment attachment;
+  Attachment attachment;
 };
 
 /// 皮肤：只嵌套于 Skeleton，Project 顶层无此集合（D27）。
@@ -174,6 +314,9 @@ struct Skeleton {
   std::vector<SlotId> drawOrder;
   std::vector<Slot> slots;
   std::vector<Skin> skins;
+  /// 第二批约束（Task 5 B1）。骨架级对象，各有稳定 ID；v3 schema 里这两个键恒存在、可为空数组。
+  std::vector<IkConstraint> ikConstraints;
+  std::vector<TransformConstraint> transformConstraints;
   std::optional<SourceRef> sourceRef;
 };
 

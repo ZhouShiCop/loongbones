@@ -254,7 +254,7 @@ TEST(ImportHost, CommitPublishesResourcesAndReplacesProjectJson) {
   api::ImportDraft draft;
   draft.descriptor = api::ImportDescriptor{"test.plugin", "test.format", "1"};
   draft.document = format::createProjectDocument("candidate");
-  draft.document.sourceVersion = format::SourceFormatVersion::kV2;
+  draft.document.sourceVersion = format::SourceFormatVersion::kV3;
   draft.resources.push_back({"assets/textures/a.png", {1, 2, 3}});
   draft.resources.push_back({"assets/textures/b.png", {4, 5, 6, 7}});
   draft.valid = true;

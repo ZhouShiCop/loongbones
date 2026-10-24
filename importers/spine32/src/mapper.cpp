@@ -159,7 +159,36 @@ MapResult mapSkeletonToCanonical(const SourceSkeleton& source, const MapperOptio
     skeleton.drawOrder.push_back(skeleton.slots.back().id);
   }
 
-  // ---- 皮肤：只有 region 附件（typeByte == 0）进入 canonical ----
+  // 第二批附件的 region 查找：与 region 附件**同一套键与降级规则**（path ?? name）。
+  //
+  // reportUnresolved = false 时**不在映射层报错** —— 未命中会映射成"悬空 regionId"，
+  // 由 Domain 统一判（kRegionNotFound）。这样第二批附件的几何 / 权重问题
+  // （MESH_TRIANGLE_INDEX_OUT_OF_RANGE / MESH_WEIGHT_SUM_INVALID 等）
+  // 不会被"图集里没这个 region"抢先掩盖（fixture golden 要求先报 MESH_* 码）。
+  const auto resolveRegion = [&](const std::string& regionKey, const std::string& where,
+                                 bool reportUnresolved) -> AtlasRegionId {
+    AtlasRegionId regionId = regions.find(regionKey);
+    if (regionId.isNone() && options.allowTrailingSpaceFallback) {
+      const std::string trimmed = trimCopy(regionKey);
+      if (trimmed != regionKey) {
+        const AtlasRegionId degraded = regions.find(trimmed);
+        if (!degraded.isNone()) {
+          regionId = degraded;
+          addDiag(diags, MapperCode::kAttachmentRegionDegraded, MapperSeverity::kWarning,
+                  "附件名尾随空格，已按 trim 后的键降级匹配图集 region：'" + regionKey +
+                      "' → '" + trimmed + "'（T-B3）",
+                  where);
+        }
+      }
+    }
+    if (regionId.isNone() && reportUnresolved) {
+      addDiag(diags, MapperCode::kAttachmentRegionUnresolved, MapperSeverity::kError,
+              "附件在图集里找不到对应 region（查找键 path ?? name）：'" + regionKey + "'", where);
+    }
+    return regionId;
+  };
+
+  // ---- 皮肤：region 附件 + 第二批附件（mesh / 加权 / linked）进入 canonical ----
   for (std::size_t skinIndex = 0; skinIndex < source.skins.size(); ++skinIndex) {
     const SourceSkin& srcSkin = source.skins[skinIndex];
     Skin skin;
@@ -179,11 +208,119 @@ MapResult mapSkeletonToCanonical(const SourceSkeleton& source, const MapperOptio
       }
       const SlotId slotId = skeleton.slots[static_cast<std::size_t>(srcSlot.slotIndex)].id;
 
+      // linked mesh **没有自己的贴图**，region 来自**父附件** ⇒ 先在本 slot 内建立
+      // 「附件名 → regionId」表，再映射 linked。父可能在另一个皮肤里，但 canonical 的
+      // 父引用是 (slotId, attachmentName)，与皮肤无关（D38）。
+      std::unordered_map<std::string, AtlasRegionId> parentRegionByName;
+      for (const SourceAttachment& a : srcSlot.attachments) {
+        if (a.linkedMesh.has_value()) continue;
+        const std::string attName = a.name.value_or(a.key);
+        std::string key = attName;
+        if (a.mesh.has_value()) {
+          key = a.mesh->path.value_or(attName);
+        } else if (a.weightedMesh.has_value()) {
+          key = a.weightedMesh->path.value_or(attName);
+        } else {
+          key = a.region.path.value_or(attName);
+        }
+        AtlasRegionId rid = regions.find(key);
+        if (rid.isNone() && options.allowTrailingSpaceFallback) {
+          const std::string trimmed = trimCopy(key);
+          if (trimmed != key) {
+            const AtlasRegionId degraded = regions.find(trimmed);
+            if (!degraded.isNone()) {
+              // 预扫只建表、**不产诊断**：降级 warning 由该附件自己的映射路径产出，
+              // 否则同一附件会被报两次（既有断言 countSeverity == 1）。
+              rid = degraded;
+            }
+          }
+        }
+        parentRegionByName.emplace(attName, rid);
+      }
+
       for (std::size_t attIndex = 0; attIndex < srcSlot.attachments.size(); ++attIndex) {
         const SourceAttachment& srcAtt = srcSlot.attachments[attIndex];
         const std::string where =
             slotWhere + "/attachments[" + std::to_string(attIndex) + "]";
-        // 非 region 附件：B4 只遍历计数，这里同样不建对象（计数在 unsupported 里报告）。
+        // ---- 第二批附件（Task 5 B3）----
+        // 分派依据是**实际解析出的对象**（Reader 保证 typeByte 与之一致），
+        // 而不是 typeByte 本身 —— 人工构造的 IR 可能只有 typeByte 没有载荷。
+        if (srcAtt.mesh.has_value() || srcAtt.weightedMesh.has_value() ||
+            srcAtt.linkedMesh.has_value()) {
+          const std::string attName = srcAtt.name.value_or(srcAtt.key);
+          SkinEntry entry;
+          entry.id = ids.create(IdKind::SkinEntry);
+          entry.slotId = slotId;
+          entry.attachmentName = attName;
+
+          if (srcAtt.mesh.has_value()) {
+            const SourceMeshAttachment& src = *srcAtt.mesh;
+            const AtlasRegionId regionId = resolveRegion(src.path.value_or(attName), where, false);
+            MeshAttachment out;
+            out.regionId = regionId;
+            out.uvs = src.uvs;
+            for (std::uint16_t t : src.triangles) out.triangles.push_back(t);
+            out.vertices = src.vertices;  // 槽骨骼局部坐标（N2）
+            out.width = src.width;
+            out.height = src.height;
+            entry.attachment = out;
+          } else if (srcAtt.weightedMesh.has_value()) {
+            const SourceWeightedMeshAttachment& src = *srcAtt.weightedMesh;
+            const AtlasRegionId regionId = resolveRegion(src.path.value_or(attName), where, false);
+            WeightedMeshAttachment out;
+            out.regionId = regionId;
+            out.uvs = src.uvs;
+            for (std::uint16_t t : src.triangles) out.triangles.push_back(t);
+            out.width = src.width;
+            out.height = src.height;
+            for (const std::vector<SourceVertexBinding>& binds : src.vertexBindings) {
+              std::vector<VertexBinding> mapped;
+              mapped.reserve(binds.size());
+              for (const SourceVertexBinding& b : binds) {
+                VertexBinding vb;
+                // 骨下标越界：**不**在映射层报错 —— 映射成"悬空绑定"，
+                // 由 Domain 统一判 MESH_WEIGHT_BONE_UNRESOLVED（与 fixture golden 一致：
+                // fixture 10 必须报该码，而不是映射层的下标越界）。
+                vb.boneId = (b.boneIndex < 0 ||
+                             static_cast<std::size_t>(b.boneIndex) >= boneIds.size())
+                                ? BoneId{}
+                                : boneIds[static_cast<std::size_t>(b.boneIndex)];
+                vb.x = b.x;  // **该骨骼局部坐标**
+                vb.y = b.y;
+                vb.weight = b.weight;  // 源原值（D30；可为负，D34）
+                mapped.push_back(vb);
+              }
+              out.vertexBindings.push_back(std::move(mapped));
+            }
+            entry.attachment = out;
+          } else if (srcAtt.linkedMesh.has_value()) {
+            const SourceLinkedMeshAttachment& src = *srcAtt.linkedMesh;
+            // region 取**父附件**的（linked 自己没有贴图）；父找不到才回退到自身的键。
+            AtlasRegionId regionId;
+            const auto parentIt = parentRegionByName.find(src.parent);
+            if (parentIt != parentRegionByName.end()) {
+              regionId = parentIt->second;
+            } else {
+              regionId = resolveRegion(src.path.value_or(attName), where, false);
+            }
+            LinkedMeshAttachment out;
+            out.regionId = regionId;
+            // 父引用：canonical 用 (slotId, attachmentName)，**不复制几何**。
+            // 源里父与子同 slot；父可能在**另一个皮肤**（parentSkin 显式指定，
+            // 或 null = 同皮肤 —— D38 的两条路径），canonical 不记皮肤：
+            // Domain 校验时在同骨架**所有皮肤**里解析该键，故两条路径都成立。
+            out.parentSlotId = slotId;
+            out.parentAttachmentName = src.parent;
+            out.inheritDeform = src.inheritDeform;
+            entry.attachment = out;
+          } else {
+            continue;  // 只有 typeByte、没有载荷（例如人工构造的 IR）→ 不建对象
+          }
+          skin.entries.push_back(std::move(entry));
+          continue;
+        }
+
+        // 其它类型（boundingbox 等）不建对象（D32：只留类型占位）。
         if (srcAtt.typeByte != static_cast<std::uint8_t>(AttachmentTypeByte::kRegion)) continue;
 
         const SourceRegionAttachment& srcRegion = srcAtt.region;
@@ -225,20 +362,79 @@ MapResult mapSkeletonToCanonical(const SourceSkeleton& source, const MapperOptio
         entry.id = ids.create(IdKind::SkinEntry);
         entry.slotId = slotId;
         entry.attachmentName = attachmentName;
-        entry.attachment.regionId = regionId;
-        entry.attachment.x = srcRegion.x;
-        entry.attachment.y = srcRegion.y;
-        entry.attachment.rotationDeg = srcRegion.rotationDeg;
-        entry.attachment.scaleX = srcRegion.scaleX;
-        entry.attachment.scaleY = srcRegion.scaleY;
-        entry.attachment.width = srcRegion.width;
-        entry.attachment.height = srcRegion.height;
-        entry.attachment.color = colorFromRgba(srcRegion.colorRgba);
+        RegionAttachment att;
+        att.regionId = regionId;
+        att.x = srcRegion.x;
+        att.y = srcRegion.y;
+        att.rotationDeg = srcRegion.rotationDeg;
+        att.scaleX = srcRegion.scaleX;
+        att.scaleY = srcRegion.scaleY;
+        att.width = srcRegion.width;
+        att.height = srcRegion.height;
+        att.color = colorFromRgba(srcRegion.colorRgba);
+        entry.attachment = att;
         skin.entries.push_back(std::move(entry));
         ++result.regionAttachmentCount;
       }
     }
     skeleton.skins.push_back(std::move(skin));
+  }
+
+  // ---- 骨架级约束（Task 5 B3）----
+  for (const SourceIkConstraint& src : source.ikConstraints) {
+    IkConstraint c;
+    c.id = ids.create(IdKind::IkConstraint);
+    c.name = src.name;
+    for (int index : src.boneIndices) {
+      if (index < 0 || static_cast<std::size_t>(index) >= boneIds.size()) {
+        addDiag(diags, MapperCode::kSlotBoneOutOfRange, MapperSeverity::kError,
+                "IK 约束引用的骨骼下标越界：" + std::to_string(index), "ikConstraints");
+        return result;
+      }
+      c.boneIds.push_back(boneIds[static_cast<std::size_t>(index)]);
+    }
+    if (src.targetIndex < 0 || static_cast<std::size_t>(src.targetIndex) >= boneIds.size()) {
+      addDiag(diags, MapperCode::kSlotBoneOutOfRange, MapperSeverity::kError,
+              "IK 约束的目标骨下标越界：" + std::to_string(src.targetIndex), "ikConstraints");
+      return result;
+    }
+    c.targetBoneId = boneIds[static_cast<std::size_t>(src.targetIndex)];
+    c.mix = src.mix;              // 源原值（不解释语义，D36）
+    c.enabled = (src.mix != 0.0);  // 是否开启（D35）
+    c.bendPositive = src.bendPositive;
+    skeleton.ikConstraints.push_back(std::move(c));
+  }
+
+  for (const SourceTransformConstraint& src : source.transformConstraints) {
+    TransformConstraint c;
+    c.id = ids.create(IdKind::TransformConstraint);
+    c.name = src.name;
+    if (src.boneIndex < 0 || static_cast<std::size_t>(src.boneIndex) >= boneIds.size()) {
+      addDiag(diags, MapperCode::kSlotBoneOutOfRange, MapperSeverity::kError,
+              "transform 约束引用的骨骼下标越界：" + std::to_string(src.boneIndex),
+              "transformConstraints");
+      return result;
+    }
+    c.boneId = boneIds[static_cast<std::size_t>(src.boneIndex)];
+    if (src.targetIndex < 0 || static_cast<std::size_t>(src.targetIndex) >= boneIds.size()) {
+      addDiag(diags, MapperCode::kSlotBoneOutOfRange, MapperSeverity::kError,
+              "transform 约束的目标骨下标越界：" + std::to_string(src.targetIndex),
+              "transformConstraints");
+      return result;
+    }
+    c.targetBoneId = boneIds[static_cast<std::size_t>(src.targetIndex)];
+    // 4 个 mix + 6 个 offset：**原值承载、不解释语义**（D36）
+    c.rotateMix = src.rotateMix;
+    c.translateMix = src.translateMix;
+    c.scaleMix = src.scaleMix;
+    c.shearMix = src.shearMix;
+    c.offsetRotation = src.offsetRotation;
+    c.offsetX = src.offsetX;
+    c.offsetY = src.offsetY;
+    c.offsetScaleX = src.offsetScaleX;
+    c.offsetScaleY = src.offsetScaleY;
+    c.offsetShearY = src.offsetShearY;
+    skeleton.transformConstraints.push_back(std::move(c));
   }
 
   // ---- 不支持的能力：只计数 + 段名，不建半成品对象 ----

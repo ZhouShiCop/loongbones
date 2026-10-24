@@ -472,14 +472,14 @@ TEST(version, unknown_format_id_rejected) {
   expectFormatFailure(text, FormatDiagnosticCode::kFormatIdUnsupported, "formatId 不匹配");
 }
 
-// 本 Reader 现在同时接受 v1 与 v2（Task 4 B3），故"高于本 Reader"的取值是 3。
-// v2 已被接受这一点由 tools/format-tests/src/test_v2_skeleton.cpp 的专门用例覆盖。
+// 本 Reader 现在同时接受 v1 / v2 / v3（Task 5 B2 起上限为 3），
+// 故"高于本 Reader"的取值是 **4**。
 TEST(version, format_version_above_reader_rejected) {
   std::string text = makeMinimalDoc();
   const std::string from = "\"formatVersion\": 1";
   const std::size_t pos = text.find(from);
   CHECK(pos != std::string::npos);
-  text.replace(pos, from.size(), "\"formatVersion\": 3");
+  text.replace(pos, from.size(), "\"formatVersion\": 4");
   expectFormatFailure(text, FormatDiagnosticCode::kFormatVersionUnsupported,
                       "formatVersion 高于本 Reader");
 }

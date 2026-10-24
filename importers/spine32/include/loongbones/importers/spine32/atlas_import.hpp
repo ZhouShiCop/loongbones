@@ -93,6 +93,10 @@ class FileSystemResourceResolver final : public IResourceResolver {
   explicit FileSystemResourceResolver(std::string authorizedRoot);
   bool read(std::string_view sourceRelativePath, std::vector<std::uint8_t>& bytes,
             std::string& error) const override;
+  /// Task 6 B1：目录列举。只列**一层普通文件**的文件名、不递归、按名称**确定性排序**。
+  /// 授权根校验与失败分类（不存在 / 无法解析 / 越出授权根）与 `read()` 完全一致。
+  bool listDirectory(std::string_view sourceDirectory, std::vector<std::string>& names,
+                     std::string& error) const override;
   [[nodiscard]] bool valid() const noexcept { return valid_; }
 
  private:

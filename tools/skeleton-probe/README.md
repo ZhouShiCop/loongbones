@@ -14,7 +14,8 @@
 | `emit-samples.mjs` | 从 `probe.mjs` 的 JSON 输出中摘录 16 个样本，打印 `docs/skeleton/sample-manifest.md` 用的数据表 |
 | `tc1-space-control.mjs` | **Task 5 A1 判据对照实验**：用已知答案的样本（多骨骼顶点自洽性、region.x/y、同 slot 的 region↔mesh）检验「顶点空间判据」本身是否成立；判据无效时会直接暴露 |
 | `type-byte-census.mjs` | **Task 5 A1（TBD-F）**：附件**类型字节**直接普查。不复用旧 TS Reader，按 `binary_reader.cpp`（B4 已验证布局）独立走字节，给出 0…5 各类型的 Full/Primary 计数与 linked 附件的父引用解析；自带与 A1 已知计数的交叉核对表 |
-| `mesh-constraint-probe.mjs` | **Task 5 A1**：第二批静态数据取证 —— 加权顶点（骨骼数/权重和/索引越界）、顶点空间判据、`hull`/`edges` 出现率、boundingbox 0 例复核、LinkedMesh 逐条、IK / transform 约束取值域（Full 与 Primary 双口径） |
+| `shared-atlas-layout-probe.mjs` | **Task 6 A1**：共享图集布局取证 —— 枚举全部「骨架 ↔ 图集不同名」单位并按形态分类（Full 1113 / Primary 963 双口径）、共享图集的页 PNG 与共用单位数、Q6-2（目录内多候选）/ Q6-3（图集在上级目录等）的样本有无。另单列**候选存在性口径**（`候选存在性` 键：目录图集数分布 / 多图集目录 / 父目录候选），与「**解析路径**」口径分开、**不得混读**（复核 P1）。只读语料，输出只含统计量与相对路径 |
+| `ik-bendpositive-probe.mjs` | **Task 5 B3**：IK `bendPositive` 与其它 bool 字段的**原始字节普查** —— 结论：3.2.01 用 **0xFF 表示 false、0x01 表示 true**（须有符号判定，官方 `!= 0` 会把 false 读成 true）；`nonessential` / `inheritScale` / `inheritRotation` 则是标准 0/1 |
 | `weight-sum-census.mjs` | **Task 5 A5（D37 证据）**：加权顶点**权重和**分布普查 —— `sum = 0` / `sum < 0` / 非有限 / `|sum−1| > tol` 的计数与 min/max，以及单条负权重绑定数。用于判定 D37 的拒绝路径在真实语料里**有没有触发样本** |
 
 `probe.mjs` 逐文件记录：相对路径、**SHA-256**、体积、版本、`nonessential`/`imagesPath`、

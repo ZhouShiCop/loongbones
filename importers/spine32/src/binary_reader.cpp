@@ -83,7 +83,7 @@ class Reader {
     if (!ok()) return false;
     readBones(sk);
     if (!ok()) return false;
-    readConstraintCounts(sk);
+    readConstraints(sk);
     if (!ok()) return false;
     readSlots(sk);
     if (!ok()) return false;
@@ -289,43 +289,66 @@ class Reader {
   }
 
   /// IK / transform 约束段：本任务只**计数**，参数按字节跳过。
-  void readConstraintCounts(SourceSkeleton& sk) {
-    sk.unsupported.ikConstraints = count("ik");
+  /// 骨架级约束：**真实解析**（Task 5 B3）。
+  ///
+  /// IK：name → bones(下标数组) → target(下标) → mix → bendPositive。
+  /// transform：name → boneIndex → target → 4 个 mix + 6 个 offset（全 f32）。
+  /// mix / offset **原值承载、不解释语义**（D36）。
+  void readConstraints(SourceSkeleton& sk) {
+    const std::size_t ikCount = count("ik");
     if (!ok()) return;
-    for (std::size_t i = 0; i < sk.unsupported.ikConstraints; ++i) {
+    sk.ikConstraints.reserve(ikCount);
+    for (std::size_t i = 0; i < ikCount; ++i) {
       const std::string base = "ik/" + std::to_string(i) + "/";
-      readStringRequired((base + "name").c_str());
+      SourceIkConstraint c;
+      c.name = readStringRequired((base + "name").c_str());
       if (!ok()) return;
       const std::size_t boneCount = count((base + "bones").c_str());
       if (!ok()) return;
-      for (std::size_t j = 0; j < boneCount; ++j) varint((base + "bones").c_str());
+      c.boneIndices.reserve(boneCount);
+      for (std::size_t j = 0; j < boneCount; ++j) {
+        const std::uint32_t idx = varint((base + "bones").c_str());
+        if (!ok()) return;
+        c.boneIndices.push_back(static_cast<int>(idx));
+      }
+      c.targetIndex = static_cast<int>(varint((base + "target").c_str()));
       if (!ok()) return;
-      varint((base + "target").c_str());
+      c.mix = f32((base + "mix").c_str());
+      // bendPositive：**有符号判定**（不是 `!= 0`）。
+      // 字节普查（tools/skeleton-probe/ik-bendpositive-probe.mjs，1113/1113 单位、
+      // 2707 条约束）显示 3.2.01 语料用 **0xFF 表示 false、0x01 表示 true**
+      // （0x01 ×1348 / 0xFF ×1359）；官方 `!= 0` 语义会把 1359 个 false 读成 true。
+      // 同一普查确认 nonessential / inheritScale / inheritRotation 都是标准 0/1，
+      // 那三处仍用 `!= 0`。
+      const std::uint8_t bendRaw = u8((base + "bendPositive").c_str());
       if (!ok()) return;
-      f32((base + "mix").c_str());
-      u8((base + "bendPositive").c_str());
-      if (!ok()) return;
+      c.bendPositive = static_cast<std::int8_t>(bendRaw) >= 0;
+      sk.ikConstraints.push_back(std::move(c));
     }
-    sk.unsupported.transformConstraints = count("transform");
+
+    const std::size_t tcCount = count("transform");
     if (!ok()) return;
-    for (std::size_t i = 0; i < sk.unsupported.transformConstraints; ++i) {
+    sk.transformConstraints.reserve(tcCount);
+    for (std::size_t i = 0; i < tcCount; ++i) {
       const std::string base = "transform/" + std::to_string(i) + "/";
-      readStringRequired((base + "name").c_str());
+      SourceTransformConstraint c;
+      c.name = readStringRequired((base + "name").c_str());
       if (!ok()) return;
-      varint((base + "boneIndex").c_str());
-      varint((base + "target").c_str());
+      c.boneIndex = static_cast<int>(varint((base + "boneIndex").c_str()));
+      c.targetIndex = static_cast<int>(varint((base + "target").c_str()));
       if (!ok()) return;
-      f32((base + "rotateMix").c_str());
-      f32((base + "translateMix").c_str());
-      f32((base + "scaleMix").c_str());
-      f32((base + "shearMix").c_str());
-      f32((base + "offsetRotation").c_str());
-      f32((base + "offsetX").c_str());
-      f32((base + "offsetY").c_str());
-      f32((base + "offsetScaleX").c_str());
-      f32((base + "offsetScaleY").c_str());
-      f32((base + "offsetShearY").c_str());
+      c.rotateMix = f32((base + "rotateMix").c_str());
+      c.translateMix = f32((base + "translateMix").c_str());
+      c.scaleMix = f32((base + "scaleMix").c_str());
+      c.shearMix = f32((base + "shearMix").c_str());
+      c.offsetRotation = f32((base + "offsetRotation").c_str());
+      c.offsetX = f32((base + "offsetX").c_str());
+      c.offsetY = f32((base + "offsetY").c_str());
+      c.offsetScaleX = f32((base + "offsetScaleX").c_str());
+      c.offsetScaleY = f32((base + "offsetScaleY").c_str());
+      c.offsetShearY = f32((base + "offsetShearY").c_str());
       if (!ok()) return;
+      sk.transformConstraints.push_back(std::move(c));
     }
   }
 
@@ -411,31 +434,45 @@ class Reader {
   /// 保存全部源语义属后续工作包。本段能通过 ≠ 这些数据已可转换。
 
   /// uint16 大端数组：先一个 varint 计数，随后 count × 2 字节。
-  void readShortArray(const char* base) {
+  /// out 为 nullptr 时只走过字节（edges 这类**不落 canonical** 的数组，D31）。
+  void readShortArray(const char* base, std::vector<std::uint16_t>* out) {
     const std::size_t n = count((std::string(base) + "/count").c_str());
     if (!ok()) return;
     if (!need(n * 2, base)) return;
-    pos_ += n * 2;
+    if (out != nullptr) out->reserve(out->size() + n);
+    for (std::size_t i = 0; i < n; ++i) {
+      const std::uint16_t v =
+          static_cast<std::uint16_t>((static_cast<std::uint16_t>(b_[pos_]) << 8) |
+                                     static_cast<std::uint16_t>(b_[pos_ + 1]));
+      pos_ += 2;
+      if (out != nullptr) out->push_back(v);
+    }
   }
 
-  /// 顶点表。
+  /// 顶点表（**非加权**）：(x, y) × vertexCount。out 为 nullptr 时只走过字节。
   ///
-  ///   非加权：(x, y) × vertexCount。
-  ///   加权：每顶点 boneCount + boneCount × (boneIndex, x, y, weight)，
-  ///       且 **boneCount 与 boneIndex 都是 float**，不是 varint。
+  ///   顶点坐标 = **槽骨骼局部坐标**（N2 维持，A1 对照实验）。
+  void readPlainVertices(std::size_t vertexCount, const char* base,
+                         std::vector<double>* out) {
+    for (std::size_t i = 0; i < vertexCount; ++i) {
+      const double x = f32(base);
+      const double y = f32(base);
+      if (!ok()) return;
+      if (out != nullptr) {
+        out->push_back(x);
+        out->push_back(y);
+      }
+    }
+  }
+
+  /// 顶点表（**加权**）：每顶点 boneCount + boneCount × (boneIndex, x, y, weight)，
+  /// 且 **boneCount 与 boneIndex 都是 float**，不是 varint。
   ///
-  /// 这一点与官方 3.x 的 readVertices（先读一个 weighted 布尔位，再用 varint 读骨数）
+  /// 这与官方 3.x 的 readVertices（先读一个 weighted 布尔位，再用 varint 读骨数）
   /// 不同，是 sdorica 3.2 的写法。曾按官方写法实现，全语料在加权网格上必然错位
   ///（顶点区首字节 0x40 会被当成 boneCount=64，超过骨架骨骼数）→ 已被语料证伪。
-  void readVertices(std::size_t vertexCount, bool weighted, const char* base) {
-    if (!weighted) {
-      for (std::size_t i = 0; i < vertexCount; ++i) {
-        f32(base);
-        f32(base);
-        if (!ok()) return;
-      }
-      return;
-    }
+  void readWeightedVertices(std::size_t vertexCount, const char* base,
+                            std::vector<std::vector<SourceVertexBinding>>* out) {
     for (std::size_t i = 0; i < vertexCount; ++i) {
       const float bc = static_cast<float>(f32(base));
       if (!ok()) return;
@@ -447,85 +484,141 @@ class Reader {
         return;
       }
       const auto n = static_cast<std::size_t>(bc);
+      std::vector<SourceVertexBinding> binds;
+      if (out != nullptr) binds.reserve(n);
       for (std::size_t j = 0; j < n; ++j) {
-        f32(base);  // boneIndex（float）
-        f32(base);  // x
-        f32(base);  // y
-        f32(base);  // weight
+        const double boneIndex = f32(base);
+        const double x = f32(base);
+        const double y = f32(base);
+        const double w = f32(base);
         if (!ok()) return;
+        // boneIndex 是 float 编码的整数下标；非整数即说明字节已错位。
+        if (std::fabs(boneIndex - std::floor(boneIndex)) > 1e-4) {
+          fail(ReadCode::kIndexOutOfRange, "加权网格的 boneIndex 不是整数下标（字节已错位）", base,
+               pos_ - 16);
+          return;
+        }
+        if (out != nullptr) {
+          SourceVertexBinding vb;
+          vb.boneIndex = static_cast<int>(boneIndex);
+          vb.x = x;
+          vb.y = y;
+          vb.weight = w;  // **源原值**（D30；可为负，D34）
+          binds.push_back(vb);
+        }
       }
+      if (out != nullptr) out->push_back(std::move(binds));
     }
   }
 
-  /// mesh 族附件的字节遍历。
-  void skipMeshAttachment(SourceAttachment& att, const char* base) {
+  /// mesh 族附件（type 1..5）：**真实解析**（Task 5 B3）。
+  ///
+  /// 布局与逐字节证据见 `docs/skeleton/task4_B4.md` §7 与 A1 取证。与官方 3.x runtime
+  /// 的两处关键差异（照抄必然错位，曾造成 630 例 STRING_TOO_LONG）：
+  ///   · 3.2 的类型映射顺序不同：3 = weightedmesh、4 = linkedmesh（官方 3.5+ 里 3 是 linkedmesh）；
+  ///   · 加权顶点的 boneCount / boneIndex 是 **float 不是 varint**。
+  ///
+  /// `hull` / `edges` 只**走过字节、不落 canonical**（D31）；boundingbox **只留类型占位**
+  /// （D32：计数 + 诊断，不建对象）。
+  void readMeshAttachment(SourceAttachment& att, const char* base) {
     using A = AttachmentTypeByte;
     const std::uint8_t t = att.typeByte;
-    switch (t) {
-      case static_cast<std::uint8_t>(A::kMesh): ++unsupported_.mesh; break;
-      case static_cast<std::uint8_t>(A::kLinkedMesh): ++unsupported_.linkedMesh; break;
-      case static_cast<std::uint8_t>(A::kWeightedMesh): ++unsupported_.weightedMesh; break;
-      case static_cast<std::uint8_t>(A::kWeightedLinkedMesh):
-        ++unsupported_.weightedLinkedMesh;
-        break;
-      case static_cast<std::uint8_t>(A::kBoundingBox): ++unsupported_.boundingBox; break;
-      default: ++unsupported_.otherAttachmentType; break;
-    }
     const std::string b(base);
-    std::optional<std::string> dummy;
 
     // boundingbox：vertexCount + 顶点（非加权）+ [color（仅 nonessential）]
     if (t == static_cast<std::uint8_t>(A::kBoundingBox)) {
+      ++unsupported_.boundingBox;
       const std::size_t n = count((b + "/vertexCount").c_str());
       if (!ok()) return;
-      readVertices(n, false, (b + "/vertices").c_str());
+      readPlainVertices(n, (b + "/vertices").c_str(), nullptr);
       if (!ok()) return;
       if (nonessential_) i32((b + "/color").c_str());
       return;
     }
 
-    readString(dummy, (b + "/path").c_str());
+    std::optional<std::string> path;
+    readString(path, (b + "/path").c_str());
     if (!ok()) return;
-    i32((b + "/color").c_str());
+    const std::uint32_t color = static_cast<std::uint32_t>(i32((b + "/color").c_str()));
     if (!ok()) return;
 
-    // linkedmesh / weightedlinkedmesh：只引用父网格，没有自己的顶点数据
+    // linkedmesh / weightedlinkedmesh：只引用父几何，没有自己的顶点数据。
     if (t == static_cast<std::uint8_t>(A::kLinkedMesh) ||
         t == static_cast<std::uint8_t>(A::kWeightedLinkedMesh)) {
-      readString(dummy, (b + "/skinName").c_str());
+      SourceLinkedMeshAttachment lm;
+      lm.name = att.name.value_or(att.key);
+      lm.path = path;
+      // 源里该字段**总是存在**：长度前缀 0 即显式 null ⇒ 父在**同皮肤**（D38 隐式路径）。
+      readString(lm.parentSkin, (b + "/skinName").c_str());
       if (!ok()) return;
-      readString(dummy, (b + "/parent").c_str());
-      if (!ok()) return;
-      u8((b + "/inheritDeform").c_str());
+      lm.parent = readStringRequired((b + "/parent").c_str());
+      lm.inheritDeform = boolAt((b + "/inheritDeform").c_str());
       if (!ok()) return;
       if (nonessential_) {
-        f32((b + "/width").c_str());
-        f32((b + "/height").c_str());
+        lm.width = f32((b + "/width").c_str());
+        lm.height = f32((b + "/height").c_str());
+        if (!ok()) return;
       }
+      att.linkedMesh = std::move(lm);
       return;
     }
 
     // mesh / weightedmesh：vertexCount → UV(2n) → 三角(u16 数组) → 顶点 → hull
     const std::size_t n = count((b + "/vertexCount").c_str());
     if (!ok()) return;
+    std::vector<double> uvs;
+    uvs.reserve(n * 2);
     for (std::size_t i = 0; i < n; ++i) {
-      f32((b + "/uvs").c_str());
-      f32((b + "/uvs").c_str());
+      const double u = f32((b + "/uvs").c_str());
+      const double v = f32((b + "/uvs").c_str());
       if (!ok()) return;
+      uvs.push_back(u);
+      uvs.push_back(v);
     }
-    readShortArray((b + "/triangles").c_str());
+    std::vector<std::uint16_t> triangles;
+    readShortArray((b + "/triangles").c_str(), &triangles);
     if (!ok()) return;
-    readVertices(n, t == static_cast<std::uint8_t>(A::kWeightedMesh), (b + "/vertices").c_str());
+
+    if (t == static_cast<std::uint8_t>(A::kWeightedMesh)) {
+      SourceWeightedMeshAttachment wm;
+      wm.name = att.name.value_or(att.key);
+      wm.path = path;
+      wm.uvs = std::move(uvs);
+      wm.triangles = std::move(triangles);
+      wm.colorRgba = color;
+      readWeightedVertices(n, (b + "/vertices").c_str(), &wm.vertexBindings);
+      if (!ok()) return;
+      count((b + "/hull").c_str());  // hull：只走过字节，不落 canonical（D31）
+      if (!ok()) return;
+      if (nonessential_) {
+        readShortArray((b + "/edges").c_str(), nullptr);  // edges：同上（D31）
+        if (!ok()) return;
+        wm.width = f32((b + "/width").c_str());
+        wm.height = f32((b + "/height").c_str());
+        if (!ok()) return;
+      }
+      att.weightedMesh = std::move(wm);
+      return;
+    }
+
+    SourceMeshAttachment m;
+    m.name = att.name.value_or(att.key);
+    m.path = path;
+    m.uvs = std::move(uvs);
+    m.triangles = std::move(triangles);
+    m.colorRgba = color;
+    readPlainVertices(n, (b + "/vertices").c_str(), &m.vertices);
     if (!ok()) return;
     count((b + "/hull").c_str());
     if (!ok()) return;
-    // 非必要字段：edges(u16 数组) + width + height
     if (nonessential_) {
-      readShortArray((b + "/edges").c_str());
+      readShortArray((b + "/edges").c_str(), nullptr);
       if (!ok()) return;
-      f32((b + "/width").c_str());
-      f32((b + "/height").c_str());
+      m.width = f32((b + "/width").c_str());
+      m.height = f32((b + "/height").c_str());
+      if (!ok()) return;
     }
+    att.mesh = std::move(m);
   }
 
   void readAttachment(SourceAttachment& att, const char* base) {
@@ -536,10 +629,10 @@ class Reader {
     att.typeByte = u8((std::string(base) + "/type").c_str());
     if (!ok()) return;
     if (att.typeByte >= 1 && att.typeByte <= 5) {
-      skipMeshAttachment(att, base);
+      readMeshAttachment(att, base);
       if (!ok()) return;
-      // 本任务不把 mesh 映射到 canonical：只留键与类型供 B5 报告，不生成伪空 region
-      att.name.reset();
+      // 第二批附件**不生成伪空 region**（region 字段保持默认）；
+      // 名字与几何都在 mesh / weightedMesh / linkedMesh 里。
       att.region = SourceRegionAttachment{};
       return;
     }

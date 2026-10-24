@@ -10,6 +10,7 @@
 
 #include "loongbones/importers/spine32/spine32_import_plugin.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -215,9 +216,34 @@ class FakeResolver final : public api::IResourceResolver {
     bytes = it->second;
     return true;
   }
+  /// Task 6 B3：目录列举。测试里可显式登记目录内容，或登记为"列举失败"。
+  void addDir(std::string path, std::vector<std::string> names) {
+    dirs_[std::move(path)] = std::move(names);
+  }
+  void failDir(std::string path, std::string message) {
+    dirErrors_[std::move(path)] = std::move(message);
+  }
+  bool listDirectory(std::string_view path, std::vector<std::string>& names,
+                     std::string& error) const override {
+    const std::string key(path);
+    const auto err = dirErrors_.find(key);
+    if (err != dirErrors_.end()) {
+      error = err->second;
+      return false;
+    }
+    const auto it = dirs_.find(key);
+    if (it == dirs_.end()) {
+      error = "no such directory";
+      return false;
+    }
+    names = it->second;
+    return true;
+  }
 
  private:
   std::map<std::string, std::vector<std::uint8_t>> files_;
+  std::map<std::string, std::vector<std::string>> dirs_;
+  std::map<std::string, std::string> dirErrors_;
 };
 
 class RecordingProgress final : public api::IProgressSink {
@@ -347,8 +373,9 @@ TEST(Spine32Plugin, MinimalUnitPreparesValidDraft) {
   CHECK_EQ(draft.resources.size(), std::size_t{1});
   CHECK_EQ(draft.resources[0].projectLocation,
           draft.document.data.textures[0].location);
+  // 落盘统一为 v3 ⇒ 导入产出的文档一律标 kV3（原为 kV2，与「写出 v3」不自洽）。
   CHECK_EQ(static_cast<int>(draft.document.sourceVersion),
-          static_cast<int>(format::SourceFormatVersion::kV2));
+          static_cast<int>(format::SourceFormatVersion::kV3));
 }
 
 TEST(Spine32Plugin, PrepareDoesNotMutateCurrent) {
@@ -509,6 +536,402 @@ TEST(Spine32Plugin, ContentHashIsSha256OfSourceFile) {
   CHECK(draft.document.data.skeletons[0].sourceRef.has_value());
   CHECK_EQ(draft.document.data.skeletons[0].sourceRef->contentHash,
           api::sha256Hex(bytes));
+}
+
+// =====================================================================
+// Task 5 B4：Domain 诊断码 → 导入诊断码的映射
+//
+// 第二批（mesh / 蒙皮 / 约束）的 9 个域码必须能被宿主按**稳定码**判断，
+// 而不是按文案 —— 域码名同时写进诊断消息，便于人工定位。
+// =====================================================================
+
+TEST(Spine32Plugin, DomainDiagnosticCodesMapToStableImportCodes) {
+  using loongbones::importers::spine32::domainDiagnosticToImportCode;
+
+  // 引用类 → kUnresolvedReference（与「附件 → region 未命中」同类）
+  CHECK_EQ(domainDiagnosticToImportCode(DiagnosticCode::kMeshWeightBoneUnresolved),
+           api::ImportCode::kUnresolvedReference);
+  CHECK_EQ(domainDiagnosticToImportCode(DiagnosticCode::kMeshLinkedParentUnresolved),
+           api::ImportCode::kUnresolvedReference);
+  CHECK_EQ(domainDiagnosticToImportCode(DiagnosticCode::kConstraintTargetUnresolved),
+           api::ImportCode::kUnresolvedReference);
+  CHECK_EQ(domainDiagnosticToImportCode(DiagnosticCode::kRegionNotFound),
+           api::ImportCode::kUnresolvedReference);
+
+  // 取值类 → kParseError（源数据本身非法）
+  CHECK_EQ(domainDiagnosticToImportCode(DiagnosticCode::kMeshTriangleIndexOutOfRange),
+           api::ImportCode::kParseError);
+  CHECK_EQ(domainDiagnosticToImportCode(DiagnosticCode::kMeshVertexGeometryInvalid),
+           api::ImportCode::kParseError);
+  CHECK_EQ(domainDiagnosticToImportCode(DiagnosticCode::kMeshUvOutOfRange),
+           api::ImportCode::kParseError);
+  CHECK_EQ(domainDiagnosticToImportCode(DiagnosticCode::kMeshWeightSumInvalid),
+           api::ImportCode::kParseError);
+  CHECK_EQ(domainDiagnosticToImportCode(DiagnosticCode::kMeshBindingCountInvalid),
+           api::ImportCode::kParseError);
+  CHECK_EQ(domainDiagnosticToImportCode(DiagnosticCode::kConstraintChainEmpty),
+           api::ImportCode::kParseError);
+  CHECK_EQ(domainDiagnosticToImportCode(DiagnosticCode::kSkeletonValueNotFinite),
+           api::ImportCode::kParseError);
+
+  // 其余域码 → kDomainRejected；kNone 原样
+  CHECK_EQ(domainDiagnosticToImportCode(DiagnosticCode::kSkeletonEmpty),
+           api::ImportCode::kDomainRejected);
+  CHECK_EQ(domainDiagnosticToImportCode(DiagnosticCode::kNone), api::ImportCode::kNone);
+}
+
+// =====================================================================
+// Task 5 B4 返修：插件层的**真实 fixture** 端到端（.skel.bytes + .atlas.txt + PNG）
+//
+// 覆盖计划 §5 要求的三类集成断言：
+//   · 端到端：第二批附件 / 约束经 prepare() 进 canonical；
+//   · 账本：report.unsupported 不含第二批键（boundingBox 仍保留位置）；
+//   · 拒绝：第二批域码经插件报出，且消息带 [CODE]。
+// =====================================================================
+
+#include <fstream>
+#include <iterator>
+#include <sstream>
+
+namespace {
+
+std::vector<std::uint8_t> readFixtureBytes(const std::string& name) {
+  std::ifstream in(fs::path(LOONGBONES_FIXTURE_DIR) / (name + ".skel.bytes"), std::ios::binary);
+  return std::vector<std::uint8_t>((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+}
+
+std::string readFixtureText(const std::string& name) {
+  std::ifstream in(fs::path(LOONGBONES_FIXTURE_DIR) / (name + ".atlas.txt"), std::ios::binary);
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+std::string replaceAll(std::string s, const std::string& from, const std::string& to) {
+  std::size_t pos = 0;
+  while ((pos = s.find(from, pos)) != std::string::npos) {
+    s.replace(pos, from.size(), to);
+    pos += to.size();
+  }
+  return s;
+}
+
+/// 用真实 fixture 的三件套走一遍 prepare。atlasName 为空时用同名 .atlas.txt。
+api::ImportDraft prepareFixture(const std::string& name, api::IIdFactory& ids,
+                                const std::string& atlasName = std::string()) {
+  const std::vector<std::uint8_t> bytes = readFixtureBytes(name);
+  const std::string atlasBase = atlasName.empty() ? name : atlasName;
+  // fixture 的 atlas 引用的是**自己的** PNG 文件名；插件侧统一提供 unit.png ⇒ 改写页名。
+  const std::string atlas = replaceAll(readFixtureText(atlasBase), atlasBase + ".png", "unit.png");
+  return prepareUnit(bytes, atlas, true, ids);
+}
+
+bool hasImportCode(const api::ImportReport& report, api::ImportCode code) {
+  for (const api::ImportDiagnostic& d : report.diagnostics) {
+    if (d.code == code) return true;
+  }
+  return false;
+}
+
+bool messageHas(const api::ImportReport& report, const std::string& needle) {
+  for (const api::ImportDiagnostic& d : report.diagnostics) {
+    if (d.message.find(needle) != std::string::npos) return true;
+  }
+  return false;
+}
+
+}  // namespace
+
+TEST(Spine32Plugin, Fixture06MeshEntersCanonical) {
+  spine32::RandomIdFactory ids;
+  const api::ImportDraft draft = prepareFixture("06-minimal-mesh", ids);
+  CHECK(draft.valid);
+  CHECK_EQ(draft.document.data.skeletons.size(), std::size_t{1});
+  const Skeleton& s = draft.document.data.skeletons[0];
+  CHECK_EQ(s.skins[0].entries.size(), std::size_t{1});
+  const auto* mesh = std::get_if<MeshAttachment>(&s.skins[0].entries[0].attachment);
+  CHECK(mesh != nullptr);
+  if (mesh != nullptr) {
+    CHECK_EQ(mesh->triangles.size(), std::size_t{3});
+    CHECK_EQ(mesh->vertices.size(), std::size_t{6});
+  }
+}
+
+TEST(Spine32Plugin, Fixture06LedgerHasNoSecondBatchEntries) {
+  spine32::RandomIdFactory ids;
+  const api::ImportDraft draft = prepareFixture("06-minimal-mesh", ids);
+  CHECK(draft.valid);
+  // 第二批能力**已支持** ⇒ 不再出现在「不支持」账本里。
+  CHECK_EQ(unsupportedCount(draft.report, "mesh"), std::size_t{0});
+  CHECK_EQ(unsupportedCount(draft.report, "weightedMesh"), std::size_t{0});
+  CHECK_EQ(unsupportedCount(draft.report, "linkedMesh"), std::size_t{0});
+  CHECK_EQ(unsupportedCount(draft.report, "weightedLinkedMesh"), std::size_t{0});
+  CHECK_EQ(unsupportedCount(draft.report, "ikConstraints"), std::size_t{0});
+  CHECK_EQ(unsupportedCount(draft.report, "transformConstraints"), std::size_t{0});
+}
+
+TEST(Spine32Plugin, Fixture07WeightedMeshEntersCanonicalWithNegativeWeight) {
+  spine32::RandomIdFactory ids;
+  const api::ImportDraft draft = prepareFixture("07-weighted-mesh", ids);
+  CHECK(draft.valid);
+  const auto* wm = std::get_if<WeightedMeshAttachment>(
+      &draft.document.data.skeletons[0].skins[0].entries[0].attachment);
+  CHECK(wm != nullptr);
+  if (wm != nullptr) {
+    CHECK_EQ(wm->vertexBindings.size(), std::size_t{3});
+    CHECK_EQ(wm->vertexBindings[0].size(), std::size_t{2});
+    CHECK(wm->vertexBindings[0][1].weight < 0.0);  // 负权重原值保留（D34）
+  }
+}
+
+TEST(Spine32Plugin, Fixture08LinkedMeshEntersCanonicalWithParentKey) {
+  spine32::RandomIdFactory ids;
+  const api::ImportDraft draft = prepareFixture("08-linked-mesh", ids);
+  CHECK(draft.valid);
+  const Skeleton& s = draft.document.data.skeletons[0];
+  CHECK_EQ(s.skins[0].entries.size(), std::size_t{3});
+  const auto* linked = std::get_if<LinkedMeshAttachment>(&s.skins[0].entries[1].attachment);
+  CHECK(linked != nullptr);
+  if (linked != nullptr) {
+    CHECK_EQ(linked->parentAttachmentName, std::string{"body_mesh"});
+    CHECK_EQ(linked->parentSlotId, s.slots[0].id);
+  }
+}
+
+TEST(Spine32Plugin, Fixture11ConstraintsEnterCanonical) {
+  spine32::RandomIdFactory ids;
+  // 11 没有图集（也没有附件）⇒ 借 06 的图集文本，满足「一个单位三件套」的导入前提。
+  const api::ImportDraft draft = prepareFixture("11-constraints", ids, "06-minimal-mesh");
+  CHECK(draft.valid);
+  const Skeleton& s = draft.document.data.skeletons[0];
+  CHECK_EQ(s.ikConstraints.size(), std::size_t{1});
+  CHECK_EQ(s.transformConstraints.size(), std::size_t{1});
+  if (!s.ikConstraints.empty()) {
+    CHECK(s.ikConstraints[0].enabled);  // mix = 1 ⇒ 开启（D35）
+  }
+}
+
+TEST(Spine32Plugin, Fixture15IkMixZeroMapsToDisabled) {
+  spine32::RandomIdFactory ids;
+  const api::ImportDraft draft = prepareFixture("15-ik-mix-zero", ids, "06-minimal-mesh");
+  CHECK(draft.valid);
+  const Skeleton& s = draft.document.data.skeletons[0];
+  CHECK_EQ(s.ikConstraints.size(), std::size_t{1});
+  if (!s.ikConstraints.empty()) {
+    CHECK(!s.ikConstraints[0].enabled);  // mix = 0 ⇒ 未开启（D35）
+  }
+}
+
+TEST(Spine32Plugin, Fixture16PlainMeshEntersCanonicalWithoutWidthHeight) {
+  spine32::RandomIdFactory ids;
+  const api::ImportDraft draft = prepareFixture("16-minimal-mesh-plain", ids);
+  CHECK(draft.valid);
+  const auto* mesh = std::get_if<MeshAttachment>(
+      &draft.document.data.skeletons[0].skins[0].entries[0].attachment);
+  CHECK(mesh != nullptr);
+  if (mesh != nullptr) {
+    CHECK_EQ(mesh->width, 0.0);   // nonessential = 0 ⇒ 不得臆造
+    CHECK_EQ(mesh->height, 0.0);
+  }
+}
+
+TEST(Spine32Plugin, Fixture14LinkedImplicitSkinEntersCanonical) {
+  spine32::RandomIdFactory ids;
+  const api::ImportDraft draft = prepareFixture("14-linked-mesh-implicit-skin", ids);
+  CHECK(draft.valid);
+  const Skeleton& s = draft.document.data.skeletons[0];
+  CHECK_EQ(s.skins[0].entries.size(), std::size_t{3});
+  const auto* linked = std::get_if<LinkedMeshAttachment>(&s.skins[0].entries[1].attachment);
+  CHECK(linked != nullptr);
+  if (linked != nullptr) {
+    CHECK_EQ(linked->parentAttachmentName, std::string{"body_wmesh"});
+  }
+}
+
+TEST(Spine32Plugin, Fixture09RejectedWithTriangleIndexCode) {
+  spine32::RandomIdFactory ids;
+  // 09 没有图集 ⇒ 借用 06 的图集文本，让流程走到 Domain 校验。
+  const api::ImportDraft draft = prepareFixture("09-mesh-bad-triangle", ids, "06-minimal-mesh");
+
+  // 插件失败路径**不设置** draft.document ⇒ 取 skeletons[0] 前必须先判空（否则越界崩溃）。
+  CHECK(!draft.valid);
+  if (!draft.document.data.skeletons.empty()) {
+    const Skeleton& sk = draft.document.data.skeletons[0];
+    const std::vector<Diagnostic> domainDiags = validateSkeleton(sk, draft.document.data);
+    CHECK(!domainDiags.empty());
+    if (!domainDiags.empty()) {
+      CHECK_EQ(domainDiags.front().code, DiagnosticCode::kMeshTriangleIndexOutOfRange);
+    }
+  }
+  CHECK(hasImportCode(draft.report, api::ImportCode::kParseError));
+  CHECK(messageHas(draft.report, "[MESH_TRIANGLE_INDEX_OUT_OF_RANGE]"));
+}
+
+TEST(Spine32Plugin, Fixture10RejectedWithWeightBoneCode) {
+  spine32::RandomIdFactory ids;
+  const api::ImportDraft draft = prepareFixture("10-mesh-bad-bone-index", ids, "06-minimal-mesh");
+  CHECK(!draft.valid);
+  CHECK(hasImportCode(draft.report, api::ImportCode::kUnresolvedReference));
+  CHECK(messageHas(draft.report, "[MESH_WEIGHT_BONE_UNRESOLVED]"));
+}
+
+TEST(Spine32Plugin, Fixture12RejectedWithWeightSumCode) {
+  spine32::RandomIdFactory ids;
+  const api::ImportDraft draft = prepareFixture("12-mesh-bad-weight-sum-zero", ids,
+                                                "06-minimal-mesh");
+  CHECK(!draft.valid);
+  CHECK(hasImportCode(draft.report, api::ImportCode::kParseError));
+  CHECK(messageHas(draft.report, "[MESH_WEIGHT_SUM_INVALID]"));
+}
+
+TEST(Spine32Plugin, Fixture13RejectedWithWeightSumCode) {
+  spine32::RandomIdFactory ids;
+  const api::ImportDraft draft = prepareFixture("13-mesh-bad-weight-sum-negative", ids,
+                                                "06-minimal-mesh");
+  CHECK(!draft.valid);
+  CHECK(hasImportCode(draft.report, api::ImportCode::kParseError));
+  CHECK(messageHas(draft.report, "[MESH_WEIGHT_SUM_INVALID]"));
+}
+
+// =====================================================================
+// Task 6 B3：共享图集布局的**产品级**断言（fixture 17 / 18 / 19 + 列举边界）
+//
+// 判据来源：docs/skeleton/fixtures/README.md §2 与 D53 / D54；
+// 取证：docs/skeleton/shared-atlas-layout-evidence.md。
+// =====================================================================
+
+namespace {
+
+std::vector<std::uint8_t> readFixtureFileBytes(const std::string& relative) {
+  std::ifstream in(fs::path(LOONGBONES_FIXTURE_DIR) / relative, std::ios::binary);
+  return std::vector<std::uint8_t>((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+}
+
+/// 把 fixture 目录下的**全部文件**注册进 resolver，并登记该目录的列举结果。
+void registerFixtureDir(FakeResolver& resolver, const std::string& dir) {
+  std::vector<std::string> names;
+  const fs::path base(fs::path(LOONGBONES_FIXTURE_DIR) / dir);
+  for (const auto& entry : fs::directory_iterator(base)) {
+    if (!entry.is_regular_file()) continue;
+    const std::string name = entry.path().filename().string();
+    names.push_back(name);
+    resolver.add(dir + "/" + name, readFixtureFileBytes(dir + "/" + name));
+  }
+  std::sort(names.begin(), names.end());
+  resolver.addDir(dir, names);
+}
+
+/// 用既有 resolver 走一遍 prepare（源路径相对 fixture 根）。
+api::ImportDraft prepareWithResolver(api::IResourceResolver& resolver, const std::string& sourcePath,
+                                      api::IIdFactory& ids) {
+  api::ImportRequest request{emptyProject(), sourcePath, resolver, ids};
+  const spine32::Spine32ImportPlugin plugin;
+  return plugin.prepare(request);
+}
+
+}  // namespace
+
+TEST(Spine32Plugin, SharedAtlasResolvesBothSkeletons) {
+  // 17-shared-atlas：两个骨架共用一份**与目录相关命名**的图集（语料同构）。
+  spine32::RandomIdFactory ids;
+  FakeResolver resolver;
+  const std::string dir = "17-shared-atlas/pair/hub";
+  registerFixtureDir(resolver, dir);
+
+  const api::ImportDraft left =
+      prepareWithResolver(resolver, dir + "/pair_hub_left.skel.bytes", ids);
+  CHECK(left.valid);
+  const api::ImportDraft right =
+      prepareWithResolver(resolver, dir + "/pair_hub_right.skel.bytes", ids);
+  CHECK(right.valid);
+
+  // 共享图集 ⇒ 两次导入各自得到 1 份图集、1 份纹理，区域数一致（同一份源文件）。
+  CHECK_EQ(left.document.data.atlases.size(), std::size_t{1});
+  CHECK_EQ(right.document.data.atlases.size(), std::size_t{1});
+  CHECK_EQ(left.document.data.textures.size(), std::size_t{1});
+  CHECK_EQ(right.document.data.textures.size(), std::size_t{1});
+  CHECK_EQ(left.document.data.atlases[0].regions.size(),
+           right.document.data.atlases[0].regions.size());
+  CHECK(!hasImportCode(left.report, api::ImportCode::kResourceMissing));
+}
+
+TEST(Spine32Plugin, AmbiguousAtlasCandidatesAreRejected) {
+  // 18-ambiguous-atlas：目录内两个 `.atlas.txt`，且**都含**目标 region ⇒
+  // 「取第一个」也能过 ⇒ 只有**显式拒绝**才算对（D54）。
+  spine32::RandomIdFactory ids;
+  FakeResolver resolver;
+  const std::string dir = "18-ambiguous-atlas/amb/duo";
+  registerFixtureDir(resolver, dir);
+
+  const api::ImportDraft draft =
+      prepareWithResolver(resolver, dir + "/duo_unit.skel.bytes", ids);
+  CHECK(!draft.valid);
+  CHECK(hasImportCode(draft.report, api::ImportCode::kResourceAmbiguous));
+  // 不得落成"资源缺失"（那是另一种失败），也不得静默选一个。
+  CHECK(!hasImportCode(draft.report, api::ImportCode::kResourceMissing));
+}
+
+TEST(Spine32Plugin, SameNameAtlasWinsOverOtherCandidate) {
+  // 19-multi-atlas-same-name：同名图集 + decoy ⇒ 必须**同名优先**：
+  // 不得判歧义，也不得取 decoy（decoy 无目标 region ⇒ 会表现为 region 未命中）。
+  spine32::RandomIdFactory ids;
+  FakeResolver resolver;
+  const std::string dir = "19-multi-atlas-same-name/multi/pick";
+  registerFixtureDir(resolver, dir);
+
+  const api::ImportDraft draft =
+      prepareWithResolver(resolver, dir + "/pick_unit.skel.bytes", ids);
+  CHECK(draft.valid);
+  CHECK(!hasImportCode(draft.report, api::ImportCode::kResourceAmbiguous));
+  CHECK(!hasImportCode(draft.report, api::ImportCode::kUnresolvedReference));
+}
+
+TEST(Spine32Plugin, DirectoryListingFailureFallsBackToResourceMissing) {
+  // 列举不可用（目录不可读）⇒ 退化为原「资源缺失」，**不放宽**任何校验。
+  spine32::RandomIdFactory ids;
+  FakeResolver resolver;
+  const std::string dir = "17-shared-atlas/pair/hub";
+  registerFixtureDir(resolver, dir);
+  resolver.failDir(dir, "目录不可读");
+
+  const api::ImportDraft draft =
+      prepareWithResolver(resolver, dir + "/pair_hub_left.skel.bytes", ids);
+  CHECK(!draft.valid);
+  CHECK(hasImportCode(draft.report, api::ImportCode::kResourceMissing));
+}
+
+TEST(Spine32Plugin, ListingOutsideAuthorizedRootIsRejected) {
+  // 真实 FileSystemResourceResolver：越界列举必须失败；合法列举只返回一层普通文件名。
+  const fs::path tmp = fs::temp_directory_path() / "lb_t6_listing";
+  fs::remove_all(tmp);
+  fs::create_directories(tmp / "sub");
+  {
+    std::ofstream out(tmp / "sub" / "x.atlas.txt");
+    out << "x";
+  }
+  const spine32::FileSystemResourceResolver resolver(tmp.string());
+  std::vector<std::string> names;
+  std::string error;
+  CHECK(!resolver.listDirectory("..", names, error));
+  CHECK(!resolver.listDirectory("sub/../../..", names, error));
+  CHECK(resolver.listDirectory("sub", names, error));
+  CHECK_EQ(names.size(), std::size_t{1});
+  CHECK_EQ(names[0], std::string{"x.atlas.txt"});
+  fs::remove_all(tmp);
+}
+
+TEST(Spine32Plugin, ListingMissingDirectoryIsRejected) {
+  const fs::path tmp = fs::temp_directory_path() / "lb_t6_listing_missing";
+  fs::remove_all(tmp);
+  fs::create_directories(tmp);
+  const spine32::FileSystemResourceResolver resolver(tmp.string());
+  std::vector<std::string> names;
+  std::string error;
+  CHECK(!resolver.listDirectory("no_such_dir", names, error));
+  CHECK(!error.empty());
+  fs::remove_all(tmp);
 }
 
 TEST(Spine32Plugin, EndToEndCommitAndReopenMatch) {

@@ -87,6 +87,82 @@ struct SourceRegionAttachment {
   std::uint32_t colorRgba = 0xFFFFFFFFu;
 };
 
+/// 非加权 mesh 附件（type 2）。顶点＝**槽骨骼局部坐标**（N2 维持）。
+struct SourceMeshAttachment {
+  std::string name;
+  std::optional<std::string> path;
+  /// regionUVs，长度 = 2×顶点数。
+  std::vector<double> uvs;
+  /// 三角索引（u16 源格式）。
+  std::vector<std::uint16_t> triangles;
+  /// 顶点 xy，长度 = 2×顶点数。
+  std::vector<double> vertices;
+  double width = 0.0;
+  double height = 0.0;
+  std::uint32_t colorRgba = 0xFFFFFFFFu;
+};
+
+/// 一个顶点对一根骨骼的绑定。**权重保留源原值**（D30；可为负，D34）。
+struct SourceVertexBinding {
+  int boneIndex = 0;
+  double x = 0.0;
+  double y = 0.0;
+  double weight = 0.0;
+};
+
+/// 加权 mesh 附件（type 3）。几何**只**在绑定里，顶点数 = vertexBindings.size()。
+struct SourceWeightedMeshAttachment {
+  std::string name;
+  std::optional<std::string> path;
+  std::vector<double> uvs;
+  std::vector<std::uint16_t> triangles;
+  std::vector<std::vector<SourceVertexBinding>> vertexBindings;
+  double width = 0.0;
+  double height = 0.0;
+  std::uint32_t colorRgba = 0xFFFFFFFFu;
+};
+
+/// linked mesh 附件（type 4 / type 5）。**不复制几何**，只引用父。
+struct SourceLinkedMeshAttachment {
+  std::string name;
+  std::optional<std::string> path;
+  /// 父所在皮肤。**null = 源里显式写 null ⇒ 同皮肤**（D38 的隐式路径）；
+  /// 有值 = 显式指定皮肤。源里该字段总是存在（长度前缀 0 即 null），
+  /// 故 null 与「没有该字段」在字节层不可混淆。
+  std::optional<std::string> parentSkin;
+  /// 父附件名（在同一 slot 下）。
+  std::string parent;
+  bool inheritDeform = false;
+  double width = 0.0;
+  double height = 0.0;
+};
+
+/// 骨架级 IK 约束（源里 bones / target 都是**下标**）。
+struct SourceIkConstraint {
+  std::string name;
+  std::vector<int> boneIndices;
+  int targetIndex = 0;
+  double mix = 0.0;
+  bool bendPositive = true;
+};
+
+/// 骨架级 transform 约束。mix / offset **原值承载、不解释语义**（D36）。
+struct SourceTransformConstraint {
+  std::string name;
+  int boneIndex = 0;
+  int targetIndex = 0;
+  double rotateMix = 0.0;
+  double translateMix = 0.0;
+  double scaleMix = 0.0;
+  double shearMix = 0.0;
+  double offsetRotation = 0.0;
+  double offsetX = 0.0;
+  double offsetY = 0.0;
+  double offsetScaleX = 0.0;
+  double offsetScaleY = 0.0;
+  double offsetShearY = 0.0;
+};
+
 /// 一个皮肤条目（(slot 下标) → 附件列表）。
 struct SourceAttachment {
   /// 皮肤里的键（skinKey）。
@@ -96,6 +172,10 @@ struct SourceAttachment {
   std::uint8_t typeByte = 0;
   /// 仅 typeByte == 0 时有效。
   SourceRegionAttachment region;
+  /// 第二批附件：按 typeByte 互斥出现（type 2 / 3 / 4 / 5）。
+  std::optional<SourceMeshAttachment> mesh;
+  std::optional<SourceWeightedMeshAttachment> weightedMesh;
+  std::optional<SourceLinkedMeshAttachment> linkedMesh;
 };
 
 struct SourceSkinSlot {
@@ -139,6 +219,10 @@ struct SourceSkeleton {
   std::vector<SourceBone> bones;
   std::vector<SourceSlot> slots;
   std::vector<SourceSkin> skins;
+
+  /// 骨架级约束（Task 5 B3）。
+  std::vector<SourceIkConstraint> ikConstraints;
+  std::vector<SourceTransformConstraint> transformConstraints;
 
   UnsupportedCounts unsupported;
 };

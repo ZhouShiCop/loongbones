@@ -167,6 +167,121 @@ constexpr int kExitCommitFailed = 5;
 constexpr int kExitErrorsPresent = 6;
 constexpr int kExitResourceMissing = 7;
 
+// ---- Task 5 B5：真实样本的**逐项**语义比对（不只是对象数）----
+// 比对第二批字段：uvs / triangles / vertices / 绑定(boneId,x,y,weight) / parentKey /
+// 约束参数。浮点用**残差**记录（native 落盘是 double 文本往返，容差取 1e-9）。
+
+struct DeepDiff {
+  std::size_t compared = 0;
+  double maxAbsResidual = 0.0;
+  std::vector<std::string> mismatches;
+};
+
+void noteResidual(double a, double b, DeepDiff& out) {
+  ++out.compared;
+  const double d = a - b;
+  const double r = d < 0 ? -d : d;
+  if (r > out.maxAbsResidual) out.maxAbsResidual = r;
+  if (r > 1e-9 && out.mismatches.size() < 10) {
+    out.mismatches.push_back("浮点残差 " + std::to_string(r) + "（" + std::to_string(a) + " vs " +
+                             std::to_string(b) + "）");
+  }
+}
+
+void expectEqual(bool ok, const std::string& what, DeepDiff& out) {
+  ++out.compared;
+  if (!ok && out.mismatches.size() < 10) out.mismatches.push_back(what);
+}
+
+void compareAttachmentDeep(const Attachment& a, const Attachment& b, const std::string& where,
+                           DeepDiff& out) {
+  expectEqual(a.index() == b.index(), where + ": 附件类型不同", out);
+  if (a.index() != b.index()) return;
+  if (const auto* ma = std::get_if<MeshAttachment>(&a)) {
+    const auto& mb = std::get<MeshAttachment>(b);
+    expectEqual(ma->uvs.size() == mb.uvs.size(), where + ": uvs 长度不同", out);
+    expectEqual(ma->triangles == mb.triangles, where + ": triangles 不同", out);
+    for (std::size_t i = 0; i < ma->uvs.size() && i < mb.uvs.size(); ++i) {
+      noteResidual(ma->uvs[i], mb.uvs[i], out);
+    }
+    for (std::size_t i = 0; i < ma->vertices.size() && i < mb.vertices.size(); ++i) {
+      noteResidual(ma->vertices[i], mb.vertices[i], out);
+    }
+  } else if (const auto* wa = std::get_if<WeightedMeshAttachment>(&a)) {
+    const auto& wb = std::get<WeightedMeshAttachment>(b);
+    expectEqual(wa->vertexBindings.size() == wb.vertexBindings.size(),
+                where + ": 顶点数不同", out);
+    expectEqual(wa->triangles == wb.triangles, where + ": triangles 不同", out);
+    for (std::size_t i = 0; i < wa->vertexBindings.size() && i < wb.vertexBindings.size(); ++i) {
+      expectEqual(wa->vertexBindings[i].size() == wb.vertexBindings[i].size(),
+                  where + ": 顶点 " + std::to_string(i) + " 的绑定数不同", out);
+      for (std::size_t j = 0;
+           j < wa->vertexBindings[i].size() && j < wb.vertexBindings[i].size(); ++j) {
+        const auto& x = wa->vertexBindings[i][j];
+        const auto& y = wb.vertexBindings[i][j];
+        expectEqual(x.boneId == y.boneId, where + ": 绑定 boneId 不同", out);
+        noteResidual(x.x, y.x, out);
+        noteResidual(x.y, y.y, out);
+        noteResidual(x.weight, y.weight, out);  // 权重**原值**往返（D30）
+      }
+    }
+  } else if (const auto* la = std::get_if<LinkedMeshAttachment>(&a)) {
+    const auto& lb = std::get<LinkedMeshAttachment>(b);
+    expectEqual(la->parentSlotId == lb.parentSlotId, where + ": parentKey.slotId 不同", out);
+    expectEqual(la->parentAttachmentName == lb.parentAttachmentName,
+                where + ": parentKey.attachmentName 不同", out);
+    expectEqual(la->inheritDeform == lb.inheritDeform, where + ": inheritDeform 不同", out);
+  }
+}
+
+void compareSkeletonDeep(const Skeleton& a, const Skeleton& b, DeepDiff& out) {
+  const std::string where = "skeletons/" + a.id.str();
+  expectEqual(a.skins.size() == b.skins.size(), where + ": 皮肤数不同", out);
+  for (std::size_t s = 0; s < a.skins.size() && s < b.skins.size(); ++s) {
+    const std::string sw = where + "/skins[" + std::to_string(s) + "]";
+    expectEqual(a.skins[s].entries.size() == b.skins[s].entries.size(), sw + ": 条目数不同", out);
+    for (std::size_t e = 0; e < a.skins[s].entries.size() && e < b.skins[s].entries.size(); ++e) {
+      compareAttachmentDeep(a.skins[s].entries[e].attachment, b.skins[s].entries[e].attachment,
+                            sw + "/entries[" + std::to_string(e) + "]", out);
+    }
+  }
+  expectEqual(a.ikConstraints.size() == b.ikConstraints.size(), where + ": IK 数不同", out);
+  for (std::size_t i = 0; i < a.ikConstraints.size() && i < b.ikConstraints.size(); ++i) {
+    const auto& x = a.ikConstraints[i];
+    const auto& y = b.ikConstraints[i];
+    const std::string w = where + "/ikConstraints[" + std::to_string(i) + "]";
+    expectEqual(x.id == y.id, w + ": id 不同", out);
+    expectEqual(x.name == y.name, w + ": name 不同", out);
+    expectEqual(x.boneIds == y.boneIds, w + ": boneIds 不同", out);
+    expectEqual(x.targetBoneId == y.targetBoneId, w + ": targetBoneId 不同", out);
+    expectEqual(x.enabled == y.enabled, w + ": enabled 不同（D35）", out);
+    expectEqual(x.bendPositive == y.bendPositive, w + ": bendPositive 不同", out);
+    noteResidual(x.mix, y.mix, out);
+  }
+  expectEqual(a.transformConstraints.size() == b.transformConstraints.size(),
+              where + ": transform 数不同", out);
+  for (std::size_t i = 0;
+       i < a.transformConstraints.size() && i < b.transformConstraints.size(); ++i) {
+    const auto& x = a.transformConstraints[i];
+    const auto& y = b.transformConstraints[i];
+    const std::string w = where + "/transformConstraints[" + std::to_string(i) + "]";
+    expectEqual(x.id == y.id, w + ": id 不同", out);
+    expectEqual(x.boneId == y.boneId, w + ": boneId 不同", out);
+    expectEqual(x.targetBoneId == y.targetBoneId, w + ": targetBoneId 不同", out);
+    // 4×mix + 6×offset **原值透传**（D36）
+    noteResidual(x.rotateMix, y.rotateMix, out);
+    noteResidual(x.translateMix, y.translateMix, out);
+    noteResidual(x.scaleMix, y.scaleMix, out);
+    noteResidual(x.shearMix, y.shearMix, out);
+    noteResidual(x.offsetRotation, y.offsetRotation, out);
+    noteResidual(x.offsetX, y.offsetX, out);
+    noteResidual(x.offsetY, y.offsetY, out);
+    noteResidual(x.offsetScaleX, y.offsetScaleX, out);
+    noteResidual(x.offsetScaleY, y.offsetScaleY, out);
+    noteResidual(x.offsetShearY, y.offsetShearY, out);
+  }
+}
+
 void printUsage() {
   std::cout << "用法：loongbones_skeleton_import_smoke <语料根目录> [选项]\n"
                "      或设置 $LOONGBONES_CORPUS_ROOT\n"
@@ -254,6 +369,8 @@ int main(int argc, char** argv) {
   CountingProgress progress;
   Tallies t;
   t.units = units.size();
+  // 提交前的骨架副本：重开后与它做**逐项**比对（B5）。
+  std::vector<Skeleton> expectedSkeletons;
 
   for (const Unit& unit : units) {
     api::ImportRequest request{document, unit.rel, resolver, ids};
@@ -308,6 +425,10 @@ int main(int argc, char** argv) {
       return kExitCommitFailed;
     }
     ++t.committed;
+    // 保存提交前的骨架（commitImport 之后 document 已被替换）
+    if (!draft.document.data.skeletons.empty()) {
+      expectedSkeletons.push_back(draft.document.data.skeletons.back());
+    }
     t.stagedFiles += draft.resources.size();
     t.textures += countOf(draft.report.counts, "texture");
     t.regions += countOf(draft.report.counts, "atlasRegion");
@@ -336,6 +457,19 @@ int main(int argc, char** argv) {
     std::size_t reopenedBones = 0;
     for (const Skeleton& s : reopened.document.data.skeletons) reopenedBones += s.bones.size();
     reopenConsistent = reopenConsistent && reopenedRegions == t.regions && reopenedBones == t.bones;
+
+    // ---- 逐项语义比对（B5）：顶点 / UV / 三角 / 权重 / 约束参数 ----
+    DeepDiff diff;
+    for (std::size_t i = 0;
+         i < expectedSkeletons.size() && i < reopened.document.data.skeletons.size(); ++i) {
+      compareSkeletonDeep(expectedSkeletons[i], reopened.document.data.skeletons[i], diff);
+    }
+    // 输出用 ASCII 前缀：管道/编码不影响取证（规范 §8.2：只输出统计量）。
+    std::cout << "\n[deep-compare] items=" << diff.compared
+              << " maxResidual=" << diff.maxAbsResidual
+              << " mismatches=" << diff.mismatches.size() << "\n";
+    for (const std::string& m : diff.mismatches) std::cout << "  ! " << m << "\n";
+    reopenConsistent = reopenConsistent && diff.mismatches.empty();
 
     std::cout << "\n重开后：骨架 " << reopened.document.data.skeletons.size() << " / 图集 "
               << reopened.document.data.atlases.size() << " / 纹理 "

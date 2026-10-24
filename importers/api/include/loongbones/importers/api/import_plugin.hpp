@@ -48,6 +48,9 @@ enum class ImportCode {
   kProjectSaveFailed,      ///< project.json 保存失败
   kWarningsNotAccepted,    ///< 存在 warning 但调用方未显式接受
   kCancelled,              ///< 调用方取消
+  /// Task 6：目录内存在**多个**候选伴随资源（如多个 `.atlas.txt`）。
+  /// 必须**显式拒绝 + 可定位诊断**，不得猜测、不得选第一个。
+  kResourceAmbiguous,
 };
 
 struct ImportDiagnostic {
@@ -96,6 +99,24 @@ class IResourceResolver {
   virtual ~IResourceResolver() = default;
   [[nodiscard]] virtual bool read(std::string_view sourceRelativePath,
                                   std::vector<std::uint8_t>& bytes, std::string& error) const = 0;
+
+  /// 列举**源所在目录**下的文件名：只一层、**不递归**、只返回文件名（不含路径）、
+  /// 按名称**确定性排序**。插件**不得**据此推断真实文件系统路径。
+  ///
+  /// Task 6（共享图集布局）新增的**可选**能力：默认实现返回 **false**（"不支持列举"），
+  /// 宿主可覆盖。插件在列举不可用时**退化为**原「骨架同名」解析，
+  /// **不得**因此放宽授权根校验 —— 这是本接口的硬边界。
+  ///
+  /// 失败分类沿用 B6 三种：目录不存在/不可读 → 资源无法解析；
+  /// 越出授权根 / 含 `..` / 绝对路径 / 符号链接逃逸 → 越出授权根。
+  [[nodiscard]] virtual bool listDirectory(std::string_view sourceDirectory,
+                                           std::vector<std::string>& names,
+                                           std::string& error) const {
+    (void)sourceDirectory;
+    (void)names;
+    error = "资源解析不支持目录列举";
+    return false;
+  }
 };
 
 /// 工程内资源写入事务：stage → publish → complete / rollback。

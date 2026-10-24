@@ -89,6 +89,18 @@ enum class DiagnosticCode {
   kSkeletonAtlasNotFound,       ///< skeleton.atlasIds 引用不存在的图集
   kSkeletonValueNotFinite,      ///< 骨架数值字段出现 NaN / Inf
   kSkeletonSourceRefInvalid,    ///< sourceRef 存在但必需字段为空或版本号为负
+
+  // ---- 骨架第二批（Task 5 B1）----
+  // 契约：docs/skeleton/mesh-and-constraint-rfc.md §11。只追加，不复用既有含义。
+  kMeshTriangleIndexOutOfRange,  ///< mesh/加权 mesh 的三角索引 ≥ 顶点数
+  kMeshVertexGeometryInvalid,    ///< 顶点数为 0，或 uvs / vertices 长度不是偶数
+  kMeshUvOutOfRange,             ///< mesh UV 落在 [0,1] 之外
+  kMeshLinkedParentUnresolved,   ///< linked mesh 的 parentKey 解析不到父附件
+  kMeshWeightSumInvalid,         ///< 某顶点权重和为 0、< 0 或非有限（D37）
+  kMeshWeightBoneUnresolved,     ///< 绑定的 boneId 指向不存在的骨骼，或源下标非整数
+  kMeshBindingCountInvalid,      ///< 某顶点的绑定列表为空
+  kConstraintTargetUnresolved,   ///< IK / transform 的骨骼或目标骨指向不存在的骨骼
+  kConstraintChainEmpty,         ///< IK 的骨骼链为空
 };
 
 /// 诊断码的稳定字符串形式。程序逻辑请用枚举，不要用这个字符串。

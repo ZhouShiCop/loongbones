@@ -34,6 +34,7 @@ const char* toString(ImportCode code) noexcept {
     case ImportCode::kProjectSaveFailed: return "IMPORT_SAVE_FAILED";
     case ImportCode::kWarningsNotAccepted: return "IMPORT_WARNINGS_NOT_ACCEPTED";
     case ImportCode::kCancelled: return "IMPORT_CANCELLED";
+    case ImportCode::kResourceAmbiguous: return "IMPORT_RESOURCE_AMBIGUOUS";
   }
   return "IMPORT_UNKNOWN";
 }

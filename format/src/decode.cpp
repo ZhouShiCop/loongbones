@@ -48,7 +48,7 @@ constexpr std::string_view kCapabilitiesKeys[] = {"required", "optional"};
 // ---- 骨架层已知键（v2 schema §3）----
 constexpr std::string_view kSkeletonKeys[] = {"id",        "name",  "atlasIds", "boneOrder",
                                               "bones",     "drawOrder", "slots",    "skins",
-                                              "sourceRef"};
+                                              "sourceRef", "ikConstraints", "transformConstraints"};
 constexpr std::string_view kBoneKeys[] = {"id",               "name",     "parentId",
                                           "x",                "y",        "rotationDeg",
                                           "scaleX",           "scaleY",   "shearXDeg",
@@ -59,9 +59,31 @@ constexpr std::string_view kSlotKeys[] = {"id",     "name",         "boneId",
 constexpr std::string_view kColorKeys[] = {"r", "g", "b", "a"};
 constexpr std::string_view kSkinKeys[] = {"id", "name", "entries"};
 constexpr std::string_view kSkinEntryKeys[] = {"id", "slotId", "attachmentName", "attachment"};
-constexpr std::string_view kAttachmentKeys[] = {"type", "regionId", "x",      "y",
-                                                "rotationDeg",      "scaleX", "scaleY",
-                                                "width", "height", "color"};
+/// 附件的已知键**按 type 分派**（Task 5 B2 评审 P0）。
+/// 绝不能用并集：若把 mesh 的 `uvs`/`triangles`/`vertices` 也塞进 region 的已知键，
+/// region 里的这些键会被当成**已知 mesh 字段去解析**（而非未知字段保留），从而污染 region 的几何数据。
+/// 按 type 分派后，类型不符的键（如 region 里的 `uvs`）会落到未知字段通道 ——
+/// 按 RFC 原样保留并回写（见 `region_attachment_with_mesh_only_field_is_kept_as_unknown`），既不误解析也不丢失。
+constexpr std::string_view kRegionAttachmentKeys[] = {"type", "regionId", "x",      "y",
+                                                      "rotationDeg",      "scaleX", "scaleY",
+                                                      "width", "height", "color"};
+constexpr std::string_view kMeshAttachmentKeys[] = {"type", "regionId", "uvs",  "triangles",
+                                                    "vertices", "width", "height"};
+constexpr std::string_view kWeightedMeshAttachmentKeys[] = {
+    "type", "regionId", "uvs", "triangles", "vertexBindings", "width", "height"};
+constexpr std::string_view kVertexBindingKeys[] = {"boneId", "x", "y", "weight"};
+constexpr std::string_view kLinkedMeshAttachmentKeys[] = {"type", "regionId", "parentKey",
+                                                          "inheritDeform"};
+constexpr std::string_view kParentKeyKeys[] = {"slotId", "attachmentName"};
+
+/// 第二批约束的已知键（v3 schema §3）。缺一项就会被 collectUnknown 收成未知字段，
+/// 再被 emitUnknowns 回写成**重复键** —— 多一轮往返即失败。
+constexpr std::string_view kIkConstraintKeys[] = {"id",       "name",   "boneIds", "targetBoneId",
+                                                  "mix",      "enabled", "bendPositive"};
+constexpr std::string_view kTransformConstraintKeys[] = {
+    "id",           "name",      "boneId",     "targetBoneId",  "rotateMix", "translateMix",
+    "scaleMix",     "shearMix",  "offsetRotation", "offsetX",  "offsetY",    "offsetScaleX",
+    "offsetScaleY", "offsetShearY"};
 constexpr std::string_view kSourceRefKeys[] = {"formatId",        "formatVersion",
                                                "sourceHeaderHash", "contentHash",
                                                "sourceUnit",       "importedBy"};
@@ -203,12 +225,16 @@ class Decoder {
     out.document.optionalCapabilities = std::move(optionalCaps_);
 
     // 版本状态：读出时的版本。**先于**迁移写入，迁移再据此判断是否要改。
-    out.document.sourceVersion = version_ == kLegacyV1Version
-                                    ? SourceFormatVersion::kV1
-                                    : SourceFormatVersion::kV2;
+    out.document.sourceVersion =
+        version_ == kLegacyV1Version
+            ? SourceFormatVersion::kV1
+            : (version_ == kLegacyV2Version ? SourceFormatVersion::kV2
+                                            : SourceFormatVersion::kV3);
     // v1 文档已在上面完整解码 + Domain 校验通过（若版本 >= 2 本函数是幂等空操作），
     // 此刻才把它迁移为内存中的 v2 结构。**不碰磁盘**。
     migrateV1ToV2(out.document);
+    // 迁移链 v1 → v2 → v3（Task 5 B2）：v3 只增结构，同样是内存内、不碰磁盘。
+    migrateV2ToV3(out.document);
     return out;
   }
 
@@ -978,6 +1004,35 @@ class Decoder {
       out.skins.push_back(skin);
     }
 
+    // 第二批约束（Task 5 B2，v3 schema §3）：v3 文档这两个键**恒存在**（可为空数组）；
+    // v2 文档没有它们 ⇒ 视为空数组，等价于 migrateV2ToV3() 的补齐结果。
+    const JsonValue* iks = obj.find("ikConstraints");
+    if (iks != nullptr) {
+      if (!iks->isArray()) {
+        return fail(FormatDiagnosticCode::kJsonTypeMismatch, "ikConstraints 必须是数组",
+                    childPointer(ptr, "ikConstraints"));
+      }
+      const std::string ip = childPointer(ptr, "ikConstraints");
+      for (std::size_t i = 0; i < iks->array.size(); ++i) {
+        IkConstraint c;
+        if (!decodeIkConstraint(iks->array[i], indexPointer(ip, i), c)) return false;
+        out.ikConstraints.push_back(c);
+      }
+    }
+    const JsonValue* trs = obj.find("transformConstraints");
+    if (trs != nullptr) {
+      if (!trs->isArray()) {
+        return fail(FormatDiagnosticCode::kJsonTypeMismatch, "transformConstraints 必须是数组",
+                    childPointer(ptr, "transformConstraints"));
+      }
+      const std::string tp = childPointer(ptr, "transformConstraints");
+      for (std::size_t i = 0; i < trs->array.size(); ++i) {
+        TransformConstraint c;
+        if (!decodeTransformConstraint(trs->array[i], indexPointer(tp, i), c)) return false;
+        out.transformConstraints.push_back(c);
+      }
+    }
+
     // sourceRef：整个对象可选；存在则逐字段校验；null 不合法（§3.7）
     {
       const JsonValue* sourceRef = obj.find("sourceRef");
@@ -1135,26 +1190,18 @@ class Decoder {
       if (!v->isObject()) {
         return fail(FormatDiagnosticCode::kJsonTypeMismatch, "attachment 必须是对象", vptr);
       }
-      if (!decodeAttachment(*v, vptr, out.attachment)) return false;
-      // Attachment 没有独立 ID：宿主是 SkinEntry，子路径 /attachment（§5.2）
-      collectUnknown(*v, kAttachmentKeys, OwnerAnchor{OwnerKind::kSkinEntry, idText},
-                     "/attachment");
+      // Attachment 没有独立 ID：宿主是 SkinEntry，子路径 /attachment（§5.2）。
+      // 未知字段的收集按 `type` **分派**在 decodeAttachment 内部完成（评审 P0）。
+      if (!decodeAttachment(*v, vptr, out.attachment, idText)) return false;
     }
 
     collectUnknown(obj, kSkinEntryKeys, OwnerAnchor{OwnerKind::kSkinEntry, idText}, "");
     return true;
   }
 
-  bool decodeAttachment(const JsonValue& obj, const std::string& ptr, RegionAttachment& out) {
-    // type 判别字段：先判能力已在 checkDeclaredCapabilities 完成；此处只严格取 region
-    std::string typeText;
-    if (!reqString(obj, "type", ptr, typeText)) return false;
-    if (typeText != "region") {
-      return fail(FormatDiagnosticCode::kJsonTypeMismatch,
-                  "attachment.type 仅支持 region（其它类型须由新能力引入）",
-                  childPointer(ptr, "type"));
-    }
-
+  /// region 附件：v2 起语义与字段**逐字不变**（Task 5 B2 只增不改）。
+  bool decodeRegionAttachment(const JsonValue& obj, const std::string& ptr,
+                              RegionAttachment& out) {
     std::string regionText;
     if (!reqString(obj, "regionId", ptr, regionText)) return false;
     out.regionId = Id::fromString(IdKind::AtlasRegion, regionText);
@@ -1175,6 +1222,253 @@ class Decoder {
       }
       if (!decodeColor(*color, cptr, out.color)) return false;
     }
+    return true;
+  }
+
+  // ---- Task 5 B2：第二批附件（mesh / weightedMesh / linkedMesh）与约束 ----
+
+  bool readDoubleElement(const JsonValue& v, const std::string& ptr, double& out) {
+    if (!v.isNumber()) {
+      return fail(FormatDiagnosticCode::kJsonTypeMismatch, "数组元素必须是 number", ptr);
+    }
+    double d = 0.0;
+    if (parseDoubleStatus(v.numberRaw, d) != DoubleParseStatus::kOk) {
+      return fail(FormatDiagnosticCode::kJsonTypeMismatch, "数值字面量越出 double 可表示范围", ptr);
+    }
+    out = d;
+    return true;
+  }
+
+  /// uvs / vertices：double 数组。缺失时视为空数组（Domain 侧再判「长度与顶点数不符」）。
+  bool decodeDoubleArray(const JsonValue& obj, const char* key, const std::string& ptr,
+                         std::vector<double>& out) {
+    const JsonValue* arr = obj.find(key);
+    if (arr == nullptr) return true;
+    const std::string ap = childPointer(ptr, key);
+    if (!arr->isArray()) {
+      return fail(FormatDiagnosticCode::kJsonTypeMismatch, "字段必须是数组", ap);
+    }
+    for (std::size_t i = 0; i < arr->array.size(); ++i) {
+      double v = 0.0;
+      if (!readDoubleElement(arr->array[i], indexPointer(ap, i), v)) return false;
+      out.push_back(v);
+    }
+    return true;
+  }
+
+  /// triangles：顶点索引，必须是**非负整数**且落在 uint32 值域（D23：值域越界即拒绝）。
+  bool decodeTriangleArray(const JsonValue& obj, const std::string& ptr,
+                           std::vector<std::uint32_t>& out) {
+    const JsonValue* arr = obj.find("triangles");
+    if (arr == nullptr) return true;
+    const std::string ap = childPointer(ptr, "triangles");
+    if (!arr->isArray()) {
+      return fail(FormatDiagnosticCode::kJsonTypeMismatch, "triangles 必须是数组", ap);
+    }
+    for (std::size_t i = 0; i < arr->array.size(); ++i) {
+      const std::string ep = indexPointer(ap, i);
+      const JsonValue& e = arr->array[i];
+      if (!e.isNumber()) {
+        return fail(FormatDiagnosticCode::kJsonTypeMismatch, "triangles 元素必须是 number", ep);
+      }
+      std::int64_t v = 0;
+      if (!readInt64Literal(e, ep, v)) return false;
+      if (v < 0 || v > 4294967295LL) {
+        return fail(FormatDiagnosticCode::kJsonTypeMismatch,
+                    "triangles 元素越出 uint32 值域", ep);
+      }
+      out.push_back(static_cast<std::uint32_t>(v));
+    }
+    return true;
+  }
+
+  bool readOptionalBool(const JsonValue& obj, const char* key, const std::string& ptr,
+                        bool& out) {
+    const JsonValue* v = obj.find(key);
+    if (v == nullptr) return true;
+    const std::string p = childPointer(ptr, key);
+    if (!v->isBool()) {
+      return fail(FormatDiagnosticCode::kJsonTypeMismatch, "字段必须是 bool", p);
+    }
+    out = v->boolValue;
+    return true;
+  }
+
+  bool decodeMeshAttachment(const JsonValue& obj, const std::string& ptr, MeshAttachment& out,
+                            const std::string& entryId) {
+    std::string regionText;
+    if (!reqString(obj, "regionId", ptr, regionText)) return false;
+    out.regionId = Id::fromString(IdKind::AtlasRegion, regionText);
+    if (!decodeDoubleArray(obj, "uvs", ptr, out.uvs)) return false;
+    if (!decodeTriangleArray(obj, ptr, out.triangles)) return false;
+    if (!decodeDoubleArray(obj, "vertices", ptr, out.vertices)) return false;
+    if (!optDouble(obj, "width", ptr, out.width)) return false;
+    if (!optDouble(obj, "height", ptr, out.height)) return false;
+    collectUnknown(obj, kMeshAttachmentKeys, OwnerAnchor{OwnerKind::kSkinEntry, entryId},
+                   "/attachment");
+    return true;
+  }
+
+  bool decodeWeightedMeshAttachment(const JsonValue& obj, const std::string& ptr,
+                                    WeightedMeshAttachment& out, const std::string& entryId) {
+    std::string regionText;
+    if (!reqString(obj, "regionId", ptr, regionText)) return false;
+    out.regionId = Id::fromString(IdKind::AtlasRegion, regionText);
+    if (!decodeDoubleArray(obj, "uvs", ptr, out.uvs)) return false;
+    if (!decodeTriangleArray(obj, ptr, out.triangles)) return false;
+
+    const JsonValue* bindings = mustArray(obj, "vertexBindings", ptr);
+    if (bindings == nullptr) return false;
+    const std::string bp = childPointer(ptr, "vertexBindings");
+    for (std::size_t i = 0; i < bindings->array.size(); ++i) {
+      const JsonValue& vert = bindings->array[i];
+      const std::string vp = indexPointer(bp, i);
+      if (!vert.isArray()) {
+        return fail(FormatDiagnosticCode::kJsonTypeMismatch, "vertexBindings 元素必须是数组", vp);
+      }
+      std::vector<VertexBinding> binds;
+      for (std::size_t j = 0; j < vert.array.size(); ++j) {
+        const JsonValue& b = vert.array[j];
+        const std::string bpj = indexPointer(vp, j);
+        if (!b.isObject()) {
+          return fail(FormatDiagnosticCode::kJsonTypeMismatch, "绑定必须是对象", bpj);
+        }
+        VertexBinding vb;
+        std::string boneText;
+        if (!reqString(b, "boneId", bpj, boneText)) return false;
+        vb.boneId = Id::fromString(IdKind::Bone, boneText);
+        if (!optDouble(b, "x", bpj, vb.x)) return false;
+        if (!optDouble(b, "y", bpj, vb.y)) return false;
+        if (!optDouble(b, "weight", bpj, vb.weight)) return false;
+        binds.push_back(vb);
+        collectUnknown(b, kVertexBindingKeys, OwnerAnchor{OwnerKind::kSkinEntry, entryId},
+                       "/attachment/vertexBindings/" + std::to_string(i) + "/" +
+                           std::to_string(j));
+      }
+      out.vertexBindings.push_back(binds);
+    }
+
+    if (!optDouble(obj, "width", ptr, out.width)) return false;
+    if (!optDouble(obj, "height", ptr, out.height)) return false;
+    collectUnknown(obj, kWeightedMeshAttachmentKeys, OwnerAnchor{OwnerKind::kSkinEntry, entryId},
+                   "/attachment");
+    return true;
+  }
+
+  /// linked mesh：**不读几何**，只读 `parentKey`（D38 两条路径在映射层统一为同键）。
+  bool decodeLinkedMeshAttachment(const JsonValue& obj, const std::string& ptr,
+                                  LinkedMeshAttachment& out, const std::string& entryId) {
+    std::string regionText;
+    if (!reqString(obj, "regionId", ptr, regionText)) return false;
+    out.regionId = Id::fromString(IdKind::AtlasRegion, regionText);
+
+    const JsonValue* pk = mustHave(obj, "parentKey", ptr);
+    if (pk == nullptr) return false;
+    const std::string pkp = childPointer(ptr, "parentKey");
+    if (!pk->isObject()) {
+      return fail(FormatDiagnosticCode::kJsonTypeMismatch, "parentKey 必须是对象", pkp);
+    }
+    std::string slotText;
+    if (!reqString(*pk, "slotId", pkp, slotText)) return false;
+    out.parentSlotId = Id::fromString(IdKind::Slot, slotText);
+    if (!reqString(*pk, "attachmentName", pkp, out.parentAttachmentName)) return false;
+    collectUnknown(*pk, kParentKeyKeys, OwnerAnchor{OwnerKind::kSkinEntry, entryId},
+                   "/attachment/parentKey");
+    if (!readOptionalBool(obj, "inheritDeform", ptr, out.inheritDeform)) return false;
+    collectUnknown(obj, kLinkedMeshAttachmentKeys, OwnerAnchor{OwnerKind::kSkinEntry, entryId},
+                   "/attachment");
+    return true;
+  }
+
+  /// 附件分派：按 `type` 严格判别；未知类型**显式拒绝**（v3 提案 §6），
+  /// 不做「当作 region」的降级。
+  bool decodeAttachment(const JsonValue& obj, const std::string& ptr, Attachment& out,
+                        const std::string& entryId) {
+    std::string typeText;
+    if (!reqString(obj, "type", ptr, typeText)) return false;
+    if (typeText == "region") {
+      RegionAttachment r;
+      if (!decodeRegionAttachment(obj, ptr, r)) return false;
+      // region 的已知键与 mesh 族**不同**：region 附件里出现 `uvs` 必须报未知字段，
+      // 而不是被静默回写（评审 P0）。
+      collectUnknown(obj, kRegionAttachmentKeys, OwnerAnchor{OwnerKind::kSkinEntry, entryId},
+                     "/attachment");
+      out = r;
+      return true;
+    }
+    if (typeText == "mesh") {
+      MeshAttachment m;
+      if (!decodeMeshAttachment(obj, ptr, m, entryId)) return false;
+      out = m;
+      return true;
+    }
+    if (typeText == "weightedMesh") {
+      WeightedMeshAttachment m;
+      if (!decodeWeightedMeshAttachment(obj, ptr, m, entryId)) return false;
+      out = m;
+      return true;
+    }
+    if (typeText == "linkedMesh") {
+      LinkedMeshAttachment m;
+      if (!decodeLinkedMeshAttachment(obj, ptr, m, entryId)) return false;
+      out = m;
+      return true;
+    }
+    return fail(FormatDiagnosticCode::kJsonTypeMismatch,
+                "attachment.type 未知（支持：region / mesh / weightedMesh / linkedMesh）",
+                childPointer(ptr, "type"));
+  }
+
+  bool decodeIkConstraint(const JsonValue& obj, const std::string& ptr, IkConstraint& out) {
+    if (!obj.isObject()) {
+      return fail(FormatDiagnosticCode::kJsonTypeMismatch, "ikConstraints 元素必须是对象", ptr);
+    }
+    std::string idText;
+    if (!reqString(obj, "id", ptr, idText)) return false;
+    out.id = Id::fromString(IdKind::IkConstraint, idText);
+    if (!reqString(obj, "name", ptr, out.name)) return false;
+    if (!decodeIdArray(obj, "boneIds", ptr, IdKind::Bone, "BoneId", &out.boneIds)) return false;
+    std::string targetText;
+    if (!reqString(obj, "targetBoneId", ptr, targetText)) return false;
+    out.targetBoneId = Id::fromString(IdKind::Bone, targetText);
+    if (!optDouble(obj, "mix", ptr, out.mix)) return false;
+    if (!readOptionalBool(obj, "enabled", ptr, out.enabled)) return false;
+    if (!readOptionalBool(obj, "bendPositive", ptr, out.bendPositive)) return false;
+    // 约束对象的未知字段此前**只写不读**（评审 G2）：这里补上收集侧，
+    // 否则 emitUnknowns 写出的锚点在解码时没有来源。
+    collectUnknown(obj, kIkConstraintKeys, OwnerAnchor{OwnerKind::kIkConstraint, idText}, "");
+    return true;
+  }
+
+  bool decodeTransformConstraint(const JsonValue& obj, const std::string& ptr,
+                                 TransformConstraint& out) {
+    if (!obj.isObject()) {
+      return fail(FormatDiagnosticCode::kJsonTypeMismatch,
+                  "transformConstraints 元素必须是对象", ptr);
+    }
+    std::string idText;
+    if (!reqString(obj, "id", ptr, idText)) return false;
+    out.id = Id::fromString(IdKind::TransformConstraint, idText);
+    if (!reqString(obj, "name", ptr, out.name)) return false;
+    std::string boneText;
+    if (!reqString(obj, "boneId", ptr, boneText)) return false;
+    out.boneId = Id::fromString(IdKind::Bone, boneText);
+    std::string targetText;
+    if (!reqString(obj, "targetBoneId", ptr, targetText)) return false;
+    out.targetBoneId = Id::fromString(IdKind::Bone, targetText);
+    // 4 个 mix + 6 个 offset：**原值读入、不解释语义**（D36）
+    if (!optDouble(obj, "rotateMix", ptr, out.rotateMix)) return false;
+    if (!optDouble(obj, "translateMix", ptr, out.translateMix)) return false;
+    if (!optDouble(obj, "scaleMix", ptr, out.scaleMix)) return false;
+    if (!optDouble(obj, "shearMix", ptr, out.shearMix)) return false;
+    if (!optDouble(obj, "offsetRotation", ptr, out.offsetRotation)) return false;
+    if (!optDouble(obj, "offsetX", ptr, out.offsetX)) return false;
+    if (!optDouble(obj, "offsetY", ptr, out.offsetY)) return false;
+    if (!optDouble(obj, "offsetScaleX", ptr, out.offsetScaleX)) return false;
+    if (!optDouble(obj, "offsetScaleY", ptr, out.offsetScaleY)) return false;
+    if (!optDouble(obj, "offsetShearY", ptr, out.offsetShearY)) return false;
+    collectUnknown(obj, kTransformConstraintKeys,
+                   OwnerAnchor{OwnerKind::kTransformConstraint, idText}, "");
     return true;
   }
 
@@ -1272,6 +1566,18 @@ class Decoder {
 LoadResult decodeDocument(const std::string& text, const ReaderLimits& limits) {
   Decoder decoder;
   return decoder.run(text, limits);
+}
+
+void migrateV2ToV3(ProjectDocument& document) {
+  // 幂等：已是 v3（或未知来源）的文档不做任何改动。
+  if (document.sourceVersion != SourceFormatVersion::kV2) return;
+
+  // v3 相对 v2 只增结构：
+  //   · 骨架的 ikConstraints / transformConstraints —— v2 无此二键，
+  //     解码时已按「缺省空数组」处理（见 decodeSkeleton），故此处无需补字段；
+  //   · 附件逐个不改（v2 只有 region，语义与字段完全不变，D29）。
+  // 因此本迁移**只**标记版本：不生成 ID、不改字段、不碰磁盘。
+  document.sourceVersion = SourceFormatVersion::kV3;
 }
 
 void migrateV1ToV2(ProjectDocument& document) {

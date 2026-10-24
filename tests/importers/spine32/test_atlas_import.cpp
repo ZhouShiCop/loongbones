@@ -112,6 +112,13 @@ bool hasCode(const std::vector<AtlasImportDiagnostic>& diags, AtlasImportCode wa
                      [want](const AtlasImportDiagnostic& d) { return d.code == want; });
 }
 
+bool messageHas(const std::vector<AtlasImportDiagnostic>& diags, const std::string& needle) {
+  return std::any_of(diags.begin(), diags.end(),
+                     [&needle](const AtlasImportDiagnostic& d) {
+                       return d.message.find(needle) != std::string::npos;
+                     });
+}
+
 }  // namespace
 
 // ---- 解析与映射 ----
@@ -249,6 +256,43 @@ TEST(AtlasImport, UnsafePagePathRejected) {
   const AtlasImportDraft d = prepare(text, r);
   CHECK(!d.valid);
   CHECK(hasCode(d.diagnostics, AtlasImportCode::kSourcePathRejected));
+}
+
+/// 区域矩形越出页边界：**图集 reader 不做边界校验**（只校语法与 `size` 形态），
+/// 所以这份畸形图集能穿过解析层、抵达 Domain 校验 ⇒ 导入器的 Domain 闸门必须拦下。
+///
+/// 本测试同时是 `atlas_import.cpp` 里 `status.isOk()` 的**回归护栏**：
+/// 若有人把它写回 `status.ok()`（静态工厂，`!…` 恒为 false ⇒ 分支变死代码），
+/// 本测试会**立即失败**。此前该闸门正是因无任何断言覆盖而长期隐身。
+TEST(AtlasImport, RegionExceedingPageIsRejectedByDomain) {
+  FakeResolver r;
+  r.add("atlas/page1.png", makePng(32, 32));
+  const std::string text =
+      "page1.png\n"
+      "size: 32,32\n"
+      "\n"
+      "a\n"
+      "  xy: 20,0\n"   // 20 + 20 = 40 > 页宽 32 ⇒ 越出页边界
+      "  size: 20,20\n";
+
+  const AtlasImportDraft d = prepare(text, r);
+  CHECK(!d.valid);
+  CHECK(hasCode(d.diagnostics, AtlasImportCode::kDomainRejected));
+  // 钉住**具体**的 Domain 判据（project.cpp 的 regionPackFitsPage ⇒ kInvalidRegionRect
+  // 「矩形越出页边界」），避免「任何 Domain 拒绝」都能让本测试通过 ⇒ 可被证伪。
+  CHECK(messageHas(d.diagnostics, "矩形越出页边界"));
+
+  // 无效 draft 不得提交：commitAtlasImport 有 `!draft.valid` 前置闸门。
+  const fs::path dir = makeTempDir("domain_reject");
+  DirectoryResourceStaging staging(dir.string());
+  CHECK(staging.valid());
+  format::ProjectDocument doc = d.document;
+  const auto diags = commitAtlasImport(d, dir.string(), "0.1.0", true, staging, doc);
+  CHECK(hasCode(diags, AtlasImportCode::kDomainRejected));
+  CHECK(!fs::exists(dir / format::kProjectFileName));
+
+  std::error_code ec;
+  fs::remove_all(dir, ec);
 }
 
 /// 未进入 Domain 模型的 Atlas 字段产生 warning，不中断导入。

@@ -43,6 +43,8 @@ enum class IdKind {
   Slot,          ///< Task 4 B2
   Skin,          ///< Task 4 B2
   SkinEntry,     ///< Task 4 B2
+  IkConstraint,         ///< Task 5 B1（骨架级对象，有稳定 ID）
+  TransformConstraint,  ///< Task 5 B1（骨架级对象，有稳定 ID）
 };
 
 /// 强类型标识。值语义、可比较；不携带任何可被当作语义使用的附加信息。

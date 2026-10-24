@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "loongbones/domain/project.hpp"
+#include "loongbones/importers/spine32/binary_reader.hpp"
 #include "tests/domain/test_framework.hpp"
 
 namespace {
@@ -92,11 +93,18 @@ SourceAttachment regionAttachment(std::string key, std::optional<std::string> na
   return a;
 }
 
+/// 一个**带真实载荷**的 mesh 附件（Task 5 B3 后 Reader 会真的解析出 mesh 对象）。
 SourceAttachment meshAttachment(std::string key) {
   SourceAttachment a;
   a.key = std::move(key);
   a.name = key;
   a.typeByte = static_cast<std::uint8_t>(AttachmentTypeByte::kMesh);
+  SourceMeshAttachment mesh;
+  mesh.name = key;
+  mesh.uvs = {0.0, 0.0, 1.0, 0.0, 0.5, 1.0};
+  mesh.triangles = {0, 1, 2};
+  mesh.vertices = {0.0, 0.0, 32.0, 0.0, 16.0, 32.0};
+  a.mesh = mesh;
   return a;
 }
 
@@ -146,9 +154,10 @@ TEST("mapper", "minimal skeleton maps and every id comes from the host factory")
   const SkinEntry& e = r.skeleton.skins[0].entries[0];
   CHECK_EQ(e.slotId, r.skeleton.slots[0].id);
   CHECK_EQ(e.attachmentName, std::string{"head"});
-  CHECK_EQ(e.attachment.regionId, regions.find("head"));
-  CHECK_EQ(e.attachment.width, 64.0);
-  CHECK_EQ(e.attachment.height, 32.0);
+  const loongbones::RegionAttachment& att = std::get<loongbones::RegionAttachment>(e.attachment);
+  CHECK_EQ(att.regionId, regions.find("head"));
+  CHECK_EQ(att.width, 64.0);
+  CHECK_EQ(att.height, 32.0);
 }
 
 TEST("mapper", "bone parent chain resolves to ids and boneOrder mirrors bones") {
@@ -222,20 +231,23 @@ TEST("mapper", "lookup key is path then name then skin key") {
   const SourceSkeleton a = oneSkinSkeleton({regionAttachment("k", "n", std::string{"p"})});
   const MapResult ra = mapSkeletonToCanonical(a, options(), regions, ids);
   CHECK(ra.valid);
-  CHECK_EQ(ra.skeleton.skins[0].entries[0].attachment.regionId, regions.find("p"));
+  CHECK_EQ(std::get<loongbones::RegionAttachment>(ra.skeleton.skins[0].entries[0].attachment).regionId,
+           regions.find("p"));
   CHECK_EQ(ra.skeleton.skins[0].entries[0].attachmentName, std::string{"n"});
 
   // 无 path 时用 name。
   const SourceSkeleton b = oneSkinSkeleton({regionAttachment("k", std::string{"n"}, std::nullopt)});
   const MapResult rb = mapSkeletonToCanonical(b, options(), regions, ids);
   CHECK(rb.valid);
-  CHECK_EQ(rb.skeleton.skins[0].entries[0].attachment.regionId, regions.find("n"));
+  CHECK_EQ(std::get<loongbones::RegionAttachment>(rb.skeleton.skins[0].entries[0].attachment).regionId,
+           regions.find("n"));
 
   // 无 name 时回退到皮肤键。
   const SourceSkeleton c = oneSkinSkeleton({regionAttachment("k", std::nullopt, std::nullopt)});
   const MapResult rc = mapSkeletonToCanonical(c, options(), regions, ids);
   CHECK(rc.valid);
-  CHECK_EQ(rc.skeleton.skins[0].entries[0].attachment.regionId, regions.find("k"));
+  CHECK_EQ(std::get<loongbones::RegionAttachment>(rc.skeleton.skins[0].entries[0].attachment).regionId,
+           regions.find("k"));
   CHECK_EQ(rc.skeleton.skins[0].entries[0].attachmentName, std::string{"k"});
 }
 
@@ -251,7 +263,8 @@ TEST("mapper", "trailing space degrades with a warning when allowed") {
   CHECK(r.valid);
   CHECK(hasCode(r, MapperCode::kAttachmentRegionDegraded));
   CHECK_EQ(countSeverity(r, MapperSeverity::kWarning), std::size_t{1});
-  CHECK_EQ(r.skeleton.skins[0].entries[0].attachment.regionId, regions.find("head_back"));
+  CHECK_EQ(std::get<loongbones::RegionAttachment>(r.skeleton.skins[0].entries[0].attachment).regionId,
+           regions.find("head_back"));
 
   // 关闭降级后，同一输入必须变成 error —— 不得静默丢弃附件。
   MapperOptions off = options();
@@ -277,7 +290,9 @@ TEST("mapper", "unresolved region is an error with the lookup key in the message
   CHECK(mentionsKey);
 }
 
-TEST("mapper", "non region attachments are counted and never become domain objects") {
+TEST("mapper", "mesh attachments are no longer skipped: unresolved region is an error") {
+  // Task 5 B3 语义变更：mesh 附件**会**进 canonical，region 找不到即报错
+  // （不再「只计数、不建对象」）。人工构造的 unsupported 计数仍照常报告。
   CountingIdFactory ids;
   NameRegions regions({"head"});
   SourceSkeleton src = oneSkinSkeleton(
@@ -285,14 +300,307 @@ TEST("mapper", "non region attachments are counted and never become domain objec
   src.unsupported.mesh = 2;
 
   const MapResult r = mapSkeletonToCanonical(src, options(), regions, ids);
+  // 第二批附件的 region 未命中**不在映射层报错**（否则会抢先掩盖几何/权重问题），
+  // 改由 Domain 统一判（kRegionNotFound）。
   CHECK(r.valid);
-  // 只有 region 变成 SkinEntry；mesh 不产生任何对象。
-  CHECK_EQ(r.skeleton.skins[0].entries.size(), std::size_t{1});
-  CHECK_EQ(r.regionAttachmentCount, std::size_t{1});
-  CHECK_EQ(ids.count(IdKind::SkinEntry), std::size_t{1});
-  // 但必须"有话说"：计数带出 + 一条 warning。
   CHECK_EQ(r.unsupported.mesh, std::size_t{2});
-  CHECK(hasCode(r, MapperCode::kUnsupportedCapability));
+}
+
+TEST("mapper", "parsed mesh attachment becomes a domain mesh attachment") {
+  CountingIdFactory ids;
+  NameRegions regions({"m1"});
+  SourceAttachment att;
+  att.key = "m1";
+  att.name = "m1";
+  att.typeByte = 2;
+  SourceMeshAttachment mesh;
+  mesh.name = "m1";
+  mesh.uvs = {0.0, 0.0, 1.0, 0.0, 0.5, 1.0};
+  mesh.triangles = {0, 1, 2};
+  mesh.vertices = {0.0, 0.0, 32.0, 0.0, 16.0, 32.0};
+  att.mesh = mesh;
+
+  SourceSkeleton src = oneSkinSkeleton({att});
+  const MapResult r = mapSkeletonToCanonical(src, options(), regions, ids);
+  CHECK(r.valid);
+  CHECK_EQ(r.skeleton.skins[0].entries.size(), std::size_t{1});
+  const auto* mapped =
+      std::get_if<loongbones::MeshAttachment>(&r.skeleton.skins[0].entries[0].attachment);
+  CHECK(mapped != nullptr);
+  if (mapped != nullptr) {
+    CHECK_EQ(mapped->triangles.size(), std::size_t{3});
+    CHECK_EQ(mapped->vertices.size(), std::size_t{6});
+  }
+}
+
+// =====================================================================
+// Task 5 B3：合成 fixture 接入**产品 Mapper**（源 IR → canonical）与拒绝路径
+//
+// golden 来源：docs/skeleton/fixtures/README.md §2。
+// 拒绝路径在 **Domain** 判（映射层不判几何/权重），故这里走「Reader → Mapper → Domain」。
+// =====================================================================
+
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+
+namespace {
+
+std::vector<std::uint8_t> loadFixtureBytes(const std::string& name) {
+  const std::filesystem::path path =
+      std::filesystem::path(LOONGBONES_FIXTURE_DIR) / (name + ".skel.bytes");
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return {};
+  return std::vector<std::uint8_t>((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+}
+
+bool nearValue(double a, double b) { return std::fabs(a - b) < 1e-6; }
+
+}  // namespace
+
+TEST("mapper", "fixture 06 maps to a domain mesh attachment") {
+  const ReadResult read = readSkeletonBinary32(loadFixtureBytes("06-minimal-mesh"));
+  CHECK(read.ok);
+  CountingIdFactory ids;
+  NameRegions regions({"mesh-0"});
+  const MapResult r = mapSkeletonToCanonical(read.skeleton, options(), regions, ids);
+  CHECK(r.valid);
+  CHECK_EQ(r.skeleton.skins[0].entries.size(), std::size_t{1});
+  const auto* mesh =
+      std::get_if<loongbones::MeshAttachment>(&r.skeleton.skins[0].entries[0].attachment);
+  CHECK(mesh != nullptr);
+  if (mesh != nullptr) {
+    CHECK_EQ(mesh->triangles.size(), std::size_t{3});
+    CHECK_EQ(mesh->vertices.size(), std::size_t{6});
+    CHECK(nearValue(mesh->vertices[2], 32.0));
+    CHECK(nearValue(mesh->uvs[0], 0.0));
+    CHECK(nearValue(mesh->uvs[5], 1.0));
+    CHECK_EQ(mesh->regionId, regions.find("mesh-0"));
+  }
+  // 第二批能力**已支持**（Task 5 B3/B4）⇒ 不再出现在「不支持」账本里。
+  CHECK_EQ(r.unsupported.mesh, std::size_t{0});
+  CHECK_EQ(r.unsupported.weightedMesh, std::size_t{0});
+  CHECK(!hasCode(r, MapperCode::kUnsupportedCapability));
+}
+
+TEST("mapper", "fixture 07 maps weighted mesh and keeps the negative weight") {
+  const ReadResult read = readSkeletonBinary32(loadFixtureBytes("07-weighted-mesh"));
+  CHECK(read.ok);
+  CountingIdFactory ids;
+  NameRegions regions({"wmesh-0"});
+  const MapResult r = mapSkeletonToCanonical(read.skeleton, options(), regions, ids);
+  CHECK(r.valid);
+  const auto* wm = std::get_if<loongbones::WeightedMeshAttachment>(
+      &r.skeleton.skins[0].entries[0].attachment);
+  CHECK(wm != nullptr);
+  if (wm != nullptr) {
+    CHECK_EQ(wm->vertexBindings.size(), std::size_t{3});
+    CHECK_EQ(wm->vertexBindings[0].size(), std::size_t{2});
+    CHECK(nearValue(wm->vertexBindings[0][0].weight, 1.2));
+    CHECK(nearValue(wm->vertexBindings[0][1].weight, -0.2));  // 负权重原值（D34）
+    CHECK_EQ(wm->vertexBindings[0][1].boneId, r.skeleton.bones[0].id);
+    CHECK_EQ(wm->vertexBindings[2].size(), std::size_t{2});
+    CHECK(nearValue(wm->vertexBindings[1][0].weight, 1.0));
+    CHECK(nearValue(wm->vertexBindings[2][0].weight, 0.5));
+  }
+}
+
+TEST("mapper", "fixture 08 maps linked mesh with a parent key in the same slot") {
+  const ReadResult read = readSkeletonBinary32(loadFixtureBytes("08-linked-mesh"));
+  CHECK(read.ok);
+  CountingIdFactory ids;
+  NameRegions regions({"body_mesh"});
+  const MapResult r = mapSkeletonToCanonical(read.skeleton, options(), regions, ids);
+  CHECK(r.valid);
+  CHECK_EQ(r.skeleton.skins[0].entries.size(), std::size_t{3});
+  const auto* linked =
+      std::get_if<loongbones::LinkedMeshAttachment>(&r.skeleton.skins[0].entries[1].attachment);
+  CHECK(linked != nullptr);
+  if (linked != nullptr) {
+    CHECK_EQ(linked->parentAttachmentName, std::string{"body_mesh"});
+    CHECK_EQ(linked->parentSlotId, r.skeleton.slots[0].id);
+    CHECK(linked->inheritDeform);
+  }
+  const auto* linked2 =
+      std::get_if<loongbones::LinkedMeshAttachment>(&r.skeleton.skins[0].entries[2].attachment);
+  CHECK(linked2 != nullptr);
+  if (linked2 != nullptr) CHECK(!linked2->inheritDeform);
+}
+
+TEST("mapper", "fixture 14 maps linked mesh whose parent skin is null") {
+  const ReadResult read = readSkeletonBinary32(loadFixtureBytes("14-linked-mesh-implicit-skin"));
+  CHECK(read.ok);
+  CountingIdFactory ids;
+  NameRegions regions({"body_wmesh"});
+  const MapResult r = mapSkeletonToCanonical(read.skeleton, options(), regions, ids);
+  CHECK(r.valid);
+  CHECK_EQ(r.skeleton.skins[0].entries.size(), std::size_t{3});
+  const auto* parent = std::get_if<loongbones::WeightedMeshAttachment>(
+      &r.skeleton.skins[0].entries[0].attachment);
+  CHECK(parent != nullptr);
+  const auto* linked =
+      std::get_if<loongbones::LinkedMeshAttachment>(&r.skeleton.skins[0].entries[1].attachment);
+  CHECK(linked != nullptr);
+  if (linked != nullptr) {
+    CHECK_EQ(linked->parentAttachmentName, std::string{"body_wmesh"});
+    CHECK_EQ(linked->parentSlotId, r.skeleton.slots[0].id);
+  }
+}
+
+TEST("mapper", "fixture 11 maps ik and transform constraints") {
+  const ReadResult read = readSkeletonBinary32(loadFixtureBytes("11-constraints"));
+  CHECK(read.ok);
+  CountingIdFactory ids;
+  NameRegions regions({});
+  const MapResult r = mapSkeletonToCanonical(read.skeleton, options(), regions, ids);
+  CHECK(r.valid);
+  CHECK_EQ(r.skeleton.ikConstraints.size(), std::size_t{1});
+  if (!r.skeleton.ikConstraints.empty()) {
+    const auto& c = r.skeleton.ikConstraints[0];
+    CHECK_EQ(c.name, std::string{"leg-ik"});
+    CHECK(c.enabled);  // mix = 1 ⇒ 开启（D35）
+    CHECK_EQ(c.boneIds.size(), std::size_t{1});
+    CHECK_EQ(c.boneIds[0], r.skeleton.bones[1].id);
+    CHECK_EQ(c.targetBoneId, r.skeleton.bones[0].id);
+  }
+  CHECK_EQ(r.skeleton.transformConstraints.size(), std::size_t{1});
+  if (!r.skeleton.transformConstraints.empty()) {
+    const auto& c = r.skeleton.transformConstraints[0];
+    CHECK_EQ(c.name, std::string{"copy-tr"});
+    CHECK(nearValue(c.rotateMix, 90.0));  // 原值透传（D36）
+    CHECK_EQ(c.boneId, r.skeleton.bones[1].id);
+    CHECK_EQ(c.targetBoneId, r.skeleton.bones[0].id);
+    CHECK(nearValue(c.offsetScaleX, 0.5));
+  }
+}
+
+TEST("mapper", "fixture 15 maps ik with mix zero to disabled") {
+  const ReadResult read = readSkeletonBinary32(loadFixtureBytes("15-ik-mix-zero"));
+  CHECK(read.ok);
+  CountingIdFactory ids;
+  NameRegions regions({});
+  const MapResult r = mapSkeletonToCanonical(read.skeleton, options(), regions, ids);
+  CHECK(r.valid);
+  CHECK_EQ(r.skeleton.ikConstraints.size(), std::size_t{1});
+  if (!r.skeleton.ikConstraints.empty()) {
+    const auto& c = r.skeleton.ikConstraints[0];
+    CHECK(!c.enabled);            // mix = 0 ⇒ 未开启（D35）
+    CHECK(nearValue(c.mix, 0.0));  // 原值仍保留
+    CHECK(!c.bendPositive);
+  }
+}
+
+TEST("mapper", "fixture 16 maps plain mesh without width and height") {
+  const ReadResult read = readSkeletonBinary32(loadFixtureBytes("16-minimal-mesh-plain"));
+  CHECK(read.ok);
+  CountingIdFactory ids;
+  NameRegions regions({"mesh-plain"});
+  const MapResult r = mapSkeletonToCanonical(read.skeleton, options(), regions, ids);
+  CHECK(r.valid);
+  const auto* mesh =
+      std::get_if<loongbones::MeshAttachment>(&r.skeleton.skins[0].entries[0].attachment);
+  CHECK(mesh != nullptr);
+  if (mesh != nullptr) {
+    CHECK(nearValue(mesh->width, 0.0));   // nonessential = 0 ⇒ 不得臆造
+    CHECK(nearValue(mesh->height, 0.0));
+    CHECK_EQ(mesh->uvs.size(), std::size_t{6});
+  }
+}
+
+/// fixture → Reader → Mapper → Domain 拒绝：返回第一条诊断码。
+DiagnosticCode domainRejectCode(const std::string& fixture) {
+  const ReadResult read = readSkeletonBinary32(loadFixtureBytes(fixture));
+  CountingIdFactory ids;
+  NameRegions regions({});
+  const MapResult r = mapSkeletonToCanonical(read.skeleton, options(), regions, ids);
+  if (!r.valid) return DiagnosticCode::kNone;  // 映射层就拒了 → 不是本测试要验的路径
+  Project p = Project::create("fixture-check");
+  ProjectData d = p.data();
+  d.skeletons.push_back(r.skeleton);
+  const Status st = p.adoptData(d);
+  if (st.isOk()) return DiagnosticCode::kNone;
+  return st.diagnostic().code;
+}
+
+TEST("mapper", "fixture 09 is rejected by domain with the triangle index code") {
+  CHECK_EQ(domainRejectCode("09-mesh-bad-triangle"),
+           DiagnosticCode::kMeshTriangleIndexOutOfRange);
+}
+
+TEST("mapper", "fixture 10 is rejected by domain with the weight bone code") {
+  CHECK_EQ(domainRejectCode("10-mesh-bad-bone-index"),
+           DiagnosticCode::kMeshWeightBoneUnresolved);
+}
+
+TEST("mapper", "fixture 12 is rejected by domain with the weight sum code") {
+  CHECK_EQ(domainRejectCode("12-mesh-bad-weight-sum-zero"),
+           DiagnosticCode::kMeshWeightSumInvalid);
+}
+
+TEST("mapper", "fixture 13 is rejected by domain with the weight sum code") {
+  CHECK_EQ(domainRejectCode("13-mesh-bad-weight-sum-negative"),
+           DiagnosticCode::kMeshWeightSumInvalid);
+}
+
+TEST("mapper", "fixture 06 mesh keeps width and height") {
+  const ReadResult read = readSkeletonBinary32(loadFixtureBytes("06-minimal-mesh"));
+  CHECK(read.ok);
+  CountingIdFactory ids;
+  NameRegions regions({"mesh-0"});
+  const MapResult r = mapSkeletonToCanonical(read.skeleton, options(), regions, ids);
+  CHECK(r.valid);
+  const auto* mesh =
+      std::get_if<loongbones::MeshAttachment>(&r.skeleton.skins[0].entries[0].attachment);
+  CHECK(mesh != nullptr);
+  if (mesh != nullptr) {
+    CHECK(nearValue(mesh->width, 32.0));
+    CHECK(nearValue(mesh->height, 32.0));
+  }
+}
+
+TEST("mapper", "fixture 08 linked entry keeps its own region id") {
+  const ReadResult read = readSkeletonBinary32(loadFixtureBytes("08-linked-mesh"));
+  CHECK(read.ok);
+  CountingIdFactory ids;
+  NameRegions regions({"body_mesh"});
+  const MapResult r = mapSkeletonToCanonical(read.skeleton, options(), regions, ids);
+  CHECK(r.valid);
+  const auto* linked =
+      std::get_if<loongbones::LinkedMeshAttachment>(&r.skeleton.skins[0].entries[1].attachment);
+  CHECK(linked != nullptr);
+  if (linked != nullptr) {
+    CHECK_EQ(linked->regionId, regions.find("body_mesh"));
+  }
+}
+
+TEST("mapper", "fixture 14 second linked entry does not inherit deform") {
+  const ReadResult read = readSkeletonBinary32(loadFixtureBytes("14-linked-mesh-implicit-skin"));
+  CHECK(read.ok);
+  CountingIdFactory ids;
+  NameRegions regions({"body_wmesh"});
+  const MapResult r = mapSkeletonToCanonical(read.skeleton, options(), regions, ids);
+  CHECK(r.valid);
+  const auto* linked2 =
+      std::get_if<loongbones::LinkedMeshAttachment>(&r.skeleton.skins[0].entries[2].attachment);
+  CHECK(linked2 != nullptr);
+  if (linked2 != nullptr) CHECK(!linked2->inheritDeform);
+}
+
+TEST("mapper", "fixture 11 transform offsets are passed through unchanged") {
+  const ReadResult read = readSkeletonBinary32(loadFixtureBytes("11-constraints"));
+  CHECK(read.ok);
+  CountingIdFactory ids;
+  NameRegions regions({});
+  const MapResult r = mapSkeletonToCanonical(read.skeleton, options(), regions, ids);
+  CHECK(r.valid);
+  CHECK_EQ(r.skeleton.transformConstraints.size(), std::size_t{1});
+  if (!r.skeleton.transformConstraints.empty()) {
+    const auto& c = r.skeleton.transformConstraints[0];
+    CHECK(nearValue(c.offsetY, 1.0));
+    CHECK(nearValue(c.offsetScaleX, 0.5));
+    CHECK(nearValue(c.offsetScaleY, 1.0));
+  }
 }
 
 TEST("mapper", "unsupported animations and constraints are reported without pseudo objects") {

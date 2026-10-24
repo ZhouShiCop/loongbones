@@ -505,6 +505,17 @@ class Encoder {
     for (const auto& skin : skeleton.skins) emitSkin(w, skin);
     w.EndArray();
 
+    // 第二批约束（Task 5 B2，v3 schema §3）：两个键**恒存在**，可为空数组。
+    emitKey(w, "ikConstraints");
+    w.StartArray();
+    for (const auto& c : skeleton.ikConstraints) emitIkConstraint(w, c, self);
+    w.EndArray();
+
+    emitKey(w, "transformConstraints");
+    w.StartArray();
+    for (const auto& c : skeleton.transformConstraints) emitTransformConstraint(w, c, self);
+    w.EndArray();
+
     // sourceRef：**整个可选**。省略（原生创建）时不写这个键；
     // null 从不写出 —— 缺失就是用「省略」表达（v2 schema §3.7）。
     if (skeleton.sourceRef.has_value()) {
@@ -513,6 +524,68 @@ class Encoder {
     }
 
     emitUnknowns(w, doc_.unknowns, OwnerKind::kSkeleton, self, "");
+    w.EndObject();
+  }
+
+  /// IK 约束（v3 schema §3）。`mix` 写源原值；`enabled` 是**是否开启**（D35），
+  /// 二者并列写出，避免"只有 0/1"的现状被误当成语义上限。
+  void emitIkConstraint(Writer& w, const IkConstraint& c, const std::string& skeletonId) {
+    (void)skeletonId;  // 约束自身有稳定 ID，未知字段锚点用它自己的 ID
+    const std::string self = c.id.str();
+    w.StartObject();
+    emitKey(w, "id");
+    emitStr(w, self);
+    emitKey(w, "name");
+    emitStr(w, c.name);
+    emitKey(w, "boneIds");
+    emitIdArray(w, c.boneIds);
+    emitKey(w, "targetBoneId");
+    emitStr(w, c.targetBoneId.str());
+    emitKey(w, "mix");
+    emitDouble(w, c.mix);
+    emitKey(w, "enabled");
+    w.Bool(c.enabled);
+    emitKey(w, "bendPositive");
+    w.Bool(c.bendPositive);
+    emitUnknowns(w, doc_.unknowns, OwnerKind::kIkConstraint, self, "");
+    w.EndObject();
+  }
+
+  /// Transform 约束：4 个 mix + 6 个 offset **原值写出、不解释语义**（D36）。
+  void emitTransformConstraint(Writer& w, const TransformConstraint& c,
+                               const std::string& skeletonId) {
+    (void)skeletonId;  // 同上
+    const std::string self = c.id.str();
+    w.StartObject();
+    emitKey(w, "id");
+    emitStr(w, self);
+    emitKey(w, "name");
+    emitStr(w, c.name);
+    emitKey(w, "boneId");
+    emitStr(w, c.boneId.str());
+    emitKey(w, "targetBoneId");
+    emitStr(w, c.targetBoneId.str());
+    emitKey(w, "rotateMix");
+    emitDouble(w, c.rotateMix);
+    emitKey(w, "translateMix");
+    emitDouble(w, c.translateMix);
+    emitKey(w, "scaleMix");
+    emitDouble(w, c.scaleMix);
+    emitKey(w, "shearMix");
+    emitDouble(w, c.shearMix);
+    emitKey(w, "offsetRotation");
+    emitDouble(w, c.offsetRotation);
+    emitKey(w, "offsetX");
+    emitDouble(w, c.offsetX);
+    emitKey(w, "offsetY");
+    emitDouble(w, c.offsetY);
+    emitKey(w, "offsetScaleX");
+    emitDouble(w, c.offsetScaleX);
+    emitKey(w, "offsetScaleY");
+    emitDouble(w, c.offsetScaleY);
+    emitKey(w, "offsetShearY");
+    emitDouble(w, c.offsetShearY);
+    emitUnknowns(w, doc_.unknowns, OwnerKind::kTransformConstraint, self, "");
     w.EndObject();
   }
 
@@ -605,7 +678,21 @@ class Encoder {
   }
 
   /// Attachment 无独立 ID：宿主是 SkinEntry，子路径 /attachment（v2 schema §5.2）。
-  void emitAttachment(Writer& w, const RegionAttachment& attachment, const std::string& entryId) {
+  /// v3 起按 `type` 分派 4 种：region / mesh / weightedMesh / linkedMesh。
+  void emitAttachment(Writer& w, const Attachment& attachment, const std::string& entryId) {
+    if (const auto* region = std::get_if<RegionAttachment>(&attachment)) {
+      emitRegionAttachment(w, *region, entryId);
+    } else if (const auto* mesh = std::get_if<MeshAttachment>(&attachment)) {
+      emitMeshAttachment(w, *mesh, entryId);
+    } else if (const auto* weighted = std::get_if<WeightedMeshAttachment>(&attachment)) {
+      emitWeightedMeshAttachment(w, *weighted, entryId);
+    } else {
+      emitLinkedMeshAttachment(w, std::get<LinkedMeshAttachment>(attachment), entryId);
+    }
+  }
+
+  void emitRegionAttachment(Writer& w, const RegionAttachment& attachment,
+                            const std::string& entryId) {
     w.StartObject();
     emitKey(w, "type");
     emitStr(w, "region");
@@ -627,6 +714,105 @@ class Encoder {
     emitDouble(w, attachment.height);
     emitKey(w, "color");
     emitColor(w, attachment.color, OwnerKind::kSkinEntry, entryId);
+    emitUnknowns(w, doc_.unknowns, OwnerKind::kSkinEntry, entryId, "/attachment");
+    w.EndObject();
+  }
+
+  /// 非加权 mesh（v3 schema §3）：顶点 = 槽骨骼局部坐标（N2）。
+  void emitMeshAttachment(Writer& w, const MeshAttachment& a, const std::string& entryId) {
+    w.StartObject();
+    emitKey(w, "type");
+    emitStr(w, "mesh");
+    emitKey(w, "regionId");
+    emitStr(w, a.regionId.str());
+    emitKey(w, "uvs");
+    w.StartArray();
+    for (double v : a.uvs) emitDouble(w, v);
+    w.EndArray();
+    emitKey(w, "triangles");
+    w.StartArray();
+    for (std::uint32_t t : a.triangles) w.Uint(static_cast<unsigned>(t));
+    w.EndArray();
+    emitKey(w, "vertices");
+    w.StartArray();
+    for (double v : a.vertices) emitDouble(w, v);
+    w.EndArray();
+    emitKey(w, "width");
+    emitDouble(w, a.width);
+    emitKey(w, "height");
+    emitDouble(w, a.height);
+    emitUnknowns(w, doc_.unknowns, OwnerKind::kSkinEntry, entryId, "/attachment");
+    w.EndObject();
+  }
+
+  /// 加权 mesh：几何**只**落在 `vertexBindings`（顶点数 = 外层长度），权重写源原值。
+  void emitWeightedMeshAttachment(Writer& w, const WeightedMeshAttachment& a,
+                                  const std::string& entryId) {
+    w.StartObject();
+    emitKey(w, "type");
+    emitStr(w, "weightedMesh");
+    emitKey(w, "regionId");
+    emitStr(w, a.regionId.str());
+    emitKey(w, "uvs");
+    w.StartArray();
+    for (double v : a.uvs) emitDouble(w, v);
+    w.EndArray();
+    emitKey(w, "triangles");
+    w.StartArray();
+    for (std::uint32_t t : a.triangles) w.Uint(static_cast<unsigned>(t));
+    w.EndArray();
+    emitKey(w, "vertexBindings");
+    w.StartArray();
+    for (std::size_t i = 0; i < a.vertexBindings.size(); ++i) {
+      const std::vector<VertexBinding>& binds = a.vertexBindings[i];
+      w.StartArray();
+      for (std::size_t j = 0; j < binds.size(); ++j) {
+        const VertexBinding& b = binds[j];
+        w.StartObject();
+        emitKey(w, "boneId");
+        emitStr(w, b.boneId.str());
+        emitKey(w, "x");
+        emitDouble(w, b.x);
+        emitKey(w, "y");
+        emitDouble(w, b.y);
+        emitKey(w, "weight");
+        emitDouble(w, b.weight);
+        // 绑定对象内的未知字段（路径与 decode 侧**逐字一致**）
+        emitUnknowns(w, doc_.unknowns, OwnerKind::kSkinEntry, entryId,
+                     "/attachment/vertexBindings/" + std::to_string(i) + "/" +
+                         std::to_string(j));
+        w.EndObject();
+      }
+      w.EndArray();
+    }
+    w.EndArray();
+    emitKey(w, "width");
+    emitDouble(w, a.width);
+    emitKey(w, "height");
+    emitDouble(w, a.height);
+    emitUnknowns(w, doc_.unknowns, OwnerKind::kSkinEntry, entryId, "/attachment");
+    w.EndObject();
+  }
+
+  /// linked mesh：**不复制几何**，只写 `parentKey`（v3 schema §3）。
+  void emitLinkedMeshAttachment(Writer& w, const LinkedMeshAttachment& a,
+                                const std::string& entryId) {
+    w.StartObject();
+    emitKey(w, "type");
+    emitStr(w, "linkedMesh");
+    emitKey(w, "regionId");
+    emitStr(w, a.regionId.str());
+    emitKey(w, "parentKey");
+    w.StartObject();
+    emitKey(w, "slotId");
+    emitStr(w, a.parentSlotId.str());
+    emitKey(w, "attachmentName");
+    emitStr(w, a.parentAttachmentName);
+    // parentKey 内的未知字段（与 decode 侧路径**逐字一致**）
+    emitUnknowns(w, doc_.unknowns, OwnerKind::kSkinEntry, entryId, "/attachment/parentKey");
+    w.EndObject();
+    emitKey(w, "inheritDeform");
+    w.Bool(a.inheritDeform);
     emitUnknowns(w, doc_.unknowns, OwnerKind::kSkinEntry, entryId, "/attachment");
     w.EndObject();
   }

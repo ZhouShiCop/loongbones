@@ -316,7 +316,10 @@ AtlasImportDraft prepareAtlasImport(const format::ProjectDocument& current,
   for (const TextureAsset& texture : createdTextures) candidate.textures.push_back(texture);
   candidate.atlases.push_back(std::move(built));
   const Status status = Project::createWithId(candidate.id, candidate.name).adoptData(candidate);
-  if (!status.ok()) {
+  // 【勿写成 status.ok()】Status::ok() 是**静态工厂**（返回成功态），通过对象调用也只返回新的成功
+  // Status ⇒ `!status.ok()` 恒为 false，会**静默吞掉**所有 Domain 校验失败（死代码）。
+  // 判成功与否用 `isOk()`。与 spine32_import_plugin.cpp 同款，两处都已修。
+  if (!status.isOk()) {
     addDiag(result.diagnostics, AtlasImportCode::kDomainRejected,
           AtlasImportSeverity::kError,
           "候选工程未通过 Domain 校验: " + status.diagnostic().message,
@@ -326,7 +329,7 @@ AtlasImportDraft prepareAtlasImport(const format::ProjectDocument& current,
 
   format::ProjectDocument document = current;
   document.data = std::move(candidate);
-  document.sourceVersion = format::SourceFormatVersion::kV2;
+  document.sourceVersion = format::SourceFormatVersion::kV3;
 
   result.document = std::move(document);
   result.valid = true;
@@ -563,6 +566,56 @@ const char* toString(AtlasImportCode code) noexcept {
     case AtlasImportCode::kProjectSaveFailed: return "ATLAS_IMPORT_SAVE_FAILED";
   }
   return "ATLAS_IMPORT_UNKNOWN";
+}
+
+// ---- Task 6 B1：目录列举（文件系统实现仍在**插件侧**，接口在 importers/api）----
+bool FileSystemResourceResolver::listDirectory(std::string_view sourceDirectory,
+                                               std::vector<std::string>& names,
+                                               std::string& error) const {
+  names.clear();
+  if (!valid_) {
+    error = "授权根目录无效";
+    return false;
+  }
+  const std::string relative(sourceDirectory);
+  const std::string target = relative.empty() ? std::string(".") : relative;
+  if (!isSafeRelative(target)) {
+    error = "路径必须是授权根目录内的相对路径";
+    return false;
+  }
+  const fs::path root(root_);
+  const fs::path dir = root / fs::path(normalizedRelative(target));
+  std::error_code ec;
+  const fs::path canonical = fs::canonical(dir, ec);
+  if (ec) {
+    // 与 read() 同款区分：「目录不存在」和「无法解析路径」语义不同，不得混为一谈
+    std::error_code existsEc;
+    if (!fs::exists(dir, existsEc)) {
+      error = "目录不存在: " + relative;
+    } else {
+      error = "无法解析目录路径: " + relative;
+    }
+    return false;
+  }
+  if (!pathWithin(root, canonical)) {
+    error = "解析后的路径越出授权根目录";
+    return false;
+  }
+  if (!fs::is_directory(canonical, ec)) {
+    error = "不是目录: " + relative;
+    return false;
+  }
+  for (const auto& entry : fs::directory_iterator(canonical, ec)) {
+    if (ec) {
+      error = "目录不可读: " + relative;
+      return false;
+    }
+    // 只列**一层普通文件**的文件名：不递归、不含子目录、不含路径
+    std::error_code fileEc;
+    if (entry.is_regular_file(fileEc)) names.push_back(entry.path().filename().string());
+  }
+  std::sort(names.begin(), names.end());  // 确定性排序：宿主实现差异不得改变插件结果
+  return true;
 }
 
 }  // namespace loongbones::importers::spine32

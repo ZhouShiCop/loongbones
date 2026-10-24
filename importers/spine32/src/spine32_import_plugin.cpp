@@ -44,6 +44,14 @@ std::string atlasPathFor(std::string_view skeletonPath) {
   return path + ".atlas.txt";
 }
 
+/// `h0164s5/watch/h0164s5_watch_hour.skel.bytes` → `h0164s5/watch`
+/// （Task 6：共享图集布局要按**目录**列举候选，故需要目录部分；根目录下的单位返回空串。）
+std::string directoryOf(std::string_view path) {
+  const std::string p(path);
+  const auto slash = p.find_last_of('/');
+  return slash == std::string::npos ? std::string{} : p.substr(0, slash);
+}
+
 std::vector<std::string> splitSegments(std::string_view text) {
   std::vector<std::string> out;
   std::size_t start = 0;
@@ -208,14 +216,49 @@ api::ImportDraft Spine32ImportPlugin::prepare(const api::ImportRequest& request)
     return draft;
   }
 
-  // ---- 3) 读同名 `.atlas.txt` ----
+  // ---- 3) 读 `.atlas.txt`：骨架同名优先；失败才回退到「目录内唯一候选」（Task 6 B2）----
+  //
+  // 匹配优先级（docs/skeleton/plugin-host-rfc.md §4.3）：
+  //   1) 骨架同名（既有 1111 个单位的路径，**不变**）；
+  //   2) 目录内 `.atlas.txt` 恰好 1 个 ⇒ 采用（共享图集布局，语料 2 个单位）；
+  //   3) 目录内 ≥2 个 ⇒ **歧义：显式拒绝 + 诊断**，不猜测、不选第一个；
+  //   4) 列举不可用 / 目录内 0 个 ⇒ 维持原「资源缺失」诊断（既有行为不变）。
   request.progress("read-atlas", 2, 5);
-  const std::string atlasPath = atlasPathFor(request.sourceLogicalPath);
+  std::string atlasPath = atlasPathFor(request.sourceLogicalPath);
   std::vector<std::uint8_t> atlasBytes;
   if (!request.resolver.read(atlasPath, atlasBytes, error)) {
-    addDiag(api::ImportCode::kResourceMissing, api::ImportSeverity::kError,
-            "无法读取图集文件: " + error, atlasPath);
-    return draft;
+    const std::string dir = directoryOf(request.sourceLogicalPath);
+    std::vector<std::string> names;
+    std::string listError;
+    std::vector<std::string> candidates;
+    if (request.resolver.listDirectory(dir, names, listError)) {
+      constexpr std::string_view kAtlasSuffix = ".atlas.txt";
+      for (const std::string& n : names) {
+        if (n.size() >= kAtlasSuffix.size() &&
+            n.compare(n.size() - kAtlasSuffix.size(), kAtlasSuffix.size(), kAtlasSuffix) == 0) {
+          candidates.push_back(n);
+        }
+      }
+    }
+    if (candidates.size() == 1) {
+      atlasPath = dir.empty() ? candidates[0] : dir + "/" + candidates[0];
+      error.clear();
+      if (!request.resolver.read(atlasPath, atlasBytes, error)) {
+        addDiag(api::ImportCode::kResourceMissing, api::ImportSeverity::kError,
+                "无法读取图集文件: " + error, atlasPath);
+        return draft;
+      }
+    } else if (candidates.size() > 1) {
+      addDiag(api::ImportCode::kResourceAmbiguous, api::ImportSeverity::kError,
+              "目录内存在多个候选图集，无法确定使用哪一个（候选数 " +
+                  std::to_string(candidates.size()) + "）",
+              dir);
+      return draft;
+    } else {
+      addDiag(api::ImportCode::kResourceMissing, api::ImportSeverity::kError,
+              "无法读取图集文件: " + error, atlasPath);
+      return draft;
+    }
   }
   const AtlasText atlasText =
       readAtlasText(std::string(atlasBytes.begin(), atlasBytes.end()));
@@ -340,8 +383,11 @@ api::ImportDraft Spine32ImportPlugin::prepare(const api::ImportRequest& request)
   pushUnsupported("linkedMesh", u.linkedMesh);
   pushUnsupported("weightedMesh", u.weightedMesh);
   pushUnsupported("weightedLinkedMesh", u.weightedLinkedMesh);
+  // boundingbox：语料 0 例，D32 明确「只留类型占位、不实现」⇒ 属**待验证**的能力缺口，
+  // 仍记在账本里（名字保持 boundingBox，不改名以免破坏既有报告消费方）。
   pushUnsupported("boundingBox", u.boundingBox);
   pushUnsupported("otherAttachmentType", u.otherAttachmentType);
+  // IK / transform 约束同样**已支持**（Task 5 B3）⇒ 计数恒 0，不会出现在账本里。
   pushUnsupported("ikConstraints", u.ikConstraints);
   pushUnsupported("transformConstraints", u.transformConstraints);
   pushUnsupported("events", u.events);
@@ -359,16 +405,22 @@ api::ImportDraft Spine32ImportPlugin::prepare(const api::ImportRequest& request)
 
   Project probe = Project::createWithId(candidate.id, candidate.name);
   const Status status = probe.adoptData(candidate);
-  if (!status.ok()) {
-    addDiag(api::ImportCode::kDomainRejected, api::ImportSeverity::kError,
-            "候选工程未通过 Domain 校验: " + status.diagnostic().message,
-            status.diagnostic().location);
+  // 【勿写成 status.ok()】Status::ok() 是**静态工厂**（返回成功态），通过对象调用也只返回新的成功 Status
+  // ⇒ `!status.ok()` 恒为 false，会**静默吞掉**所有 Domain 校验失败。判成功与否用 `isOk()`。
+  if (!status.isOk()) {
+    // Domain 诊断码**带进报告**（Task 5 B4）：宿主要能按稳定码分支
+    // （第二批的 MESH_* / CONSTRAINT_* 码），而不是按中文文案。
+    const Diagnostic& diag = status.diagnostic();
+    addDiag(domainDiagnosticToImportCode(diag.code), api::ImportSeverity::kError,
+            "候选工程未通过 Domain 校验[" + std::string(toString(diag.code)) + "]: " +
+                diag.message,
+            diag.location);
     return draft;
   }
 
   format::ProjectDocument document = request.current;
   document.data = std::move(candidate);
-  document.sourceVersion = format::SourceFormatVersion::kV2;
+  document.sourceVersion = format::SourceFormatVersion::kV3;
 
   std::size_t skinEntryCount = 0;
   for (const Skin& skin : mapped.skeleton.skins) skinEntryCount += skin.entries.size();
@@ -382,6 +434,37 @@ api::ImportDraft Spine32ImportPlugin::prepare(const api::ImportRequest& request)
                         {"skinEntry", skinEntryCount}, {"regionAttachment", mapped.regionAttachmentCount}};
   draft.valid = true;
   return draft;
+}
+
+api::ImportCode domainDiagnosticToImportCode(DiagnosticCode code) noexcept {
+  switch (code) {
+    // ---- 第二批：引用类（源里的引用在目标工程里落不了地）----
+    case DiagnosticCode::kMeshWeightBoneUnresolved:
+    case DiagnosticCode::kMeshLinkedParentUnresolved:
+    case DiagnosticCode::kConstraintTargetUnresolved:
+      return api::ImportCode::kUnresolvedReference;
+    // ---- 第二批：取值类（源数据本身非法）----
+    case DiagnosticCode::kMeshTriangleIndexOutOfRange:
+    case DiagnosticCode::kMeshVertexGeometryInvalid:
+    case DiagnosticCode::kMeshUvOutOfRange:
+    case DiagnosticCode::kMeshWeightSumInvalid:
+    case DiagnosticCode::kMeshBindingCountInvalid:
+    case DiagnosticCode::kConstraintChainEmpty:
+      return api::ImportCode::kParseError;
+    // ---- 既有域码 ----
+    case DiagnosticCode::kRegionNotFound:
+    case DiagnosticCode::kPageNotFound:
+    case DiagnosticCode::kTextureAssetNotFound:
+      return api::ImportCode::kUnresolvedReference;
+    case DiagnosticCode::kSkeletonValueNotFinite:
+    case DiagnosticCode::kTransformNotFinite:
+      return api::ImportCode::kParseError;
+    case DiagnosticCode::kNone:
+      return api::ImportCode::kNone;
+    default:
+      break;
+  }
+  return api::ImportCode::kDomainRejected;
 }
 
 }  // namespace loongbones::importers::spine32

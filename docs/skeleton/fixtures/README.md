@@ -40,6 +40,9 @@ node tools/skeleton-probe/make-fixture.mjs --verify
 | **14-linked-mesh-implicit-skin** | `.skel.bytes` + `.atlas.txt` + `.png` | **第二批**：父**加权** mesh `body_wmesh` + 2 个子附件；类型字节 **5**、`parentSkin = null`（父在同皮肤内）—— **与语料 2 例逐字段对齐**；`inheritDeform` true / false 各一 |
 | **15-ik-mix-zero** | `.skel.bytes` | **第二批**：1 条 IK，`mix = 0` ⇒ **`enabled = false`**（D35 的 false 分支；语料 302 例为此值，此前无任何样本）；`bendPositive = false`；无附件、无图集 |
 | **16-minimal-mesh-plain** | `.skel.bytes` + `.atlas.txt` + `.png` | **第二批**：`nonessential = 0` 的最小 mesh —— **无 `edges` / `width` / `height`、骨骼末尾无 4 字节颜色**。这是语料 **1109 / 1113 单位**的形态（06 是仅 4 个单位的少数形态） |
+| **17-shared-atlas** | **目录** `pair/hub/`：2 个 `.skel.bytes` + 1 个 `.atlas.txt` + 1 个 `.png` | **Task 6 A4 正向**：两个骨架共用一份 `<上级目录名>_<目录名>.atlas.txt`（`pair_hub.atlas.txt`）+ 单页 PNG。**与语料唯一一处 `h0164s5/watch/` 逐形态对齐**（2 个单位 / 1 图集 / 1 页）。图集内 2 个 region 分属两个骨架 ⇒ 不能靠"随便取一个"通过 |
+| **18-ambiguous-atlas** | **目录** `amb/duo/`：1 个 `.skel.bytes` + **2 个** `.atlas.txt` + 2 个 `.png` | **Task 6 A4 负向（Q6-2）**：目录内 2 个候选图集且**都不与骨架同名**（`duo_alpha` / `duo_beta` vs `duo_unit`）⇒ **必须显式拒绝 + 可定位诊断**（列出候选数）。两个图集**都含** `duo_region` ⇒ "取第一个"也能解析成功，因此**只有显式拒绝才算对** |
+| **19-multi-atlas-same-name** | **目录** `multi/pick/`：1 个 `.skel.bytes` + 2 个 `.atlas.txt` + 2 个 `.png` | **Task 6 A4 守卫（回归）**：目录内 2 个图集，但**骨架同名的一个存在**（`pick_unit.atlas.txt` + `decoy.atlas.txt`）⇒ 必须走**同名优先**，**不得**判歧义、**不得**取 decoy。对应语料 **5 个目录 / 11 个骨架**的真实情形 |
 
 > **08 与 14 是两条不同的解析路径，缺一不可**：08 = 类型 4 + 显式 `parentSkin`（语料 **0 例**），
 > 14 = 类型 5 + `parentSkin = null`（语料 **2 例**，唯一真实形态）。负责人裁定（2026-10-22）：
@@ -78,13 +81,16 @@ node tools/skeleton-probe/make-fixture.mjs --verify
 | 14-linked-mesh-implicit-skin | 解析成功；同一 slot 下 3 个附件：`body_wmesh`（weightedMesh，3 顶点 × 1 绑定，权重和均 = 1.0）+ `body_wmesh_linked`（`inheritDeform=true`）+ `body_wmesh_linked_noffd`（`false`）；两条子附件 `parentSkin = null` ⇒ 父引用在**同皮肤内**解析，`parentKey=(slot-body, body_wmesh)` |
 | 15-ik-mix-zero | 解析成功；`ikConstraints=1`（`mix=0` ⇒ **`enabled=false`**，`bendPositive=false`；`mix` 原值 0 **保留**，D35）；无附件 |
 | 16-minimal-mesh-plain | 解析成功；`bones=1 slots=1 skins=1 attachments=1`；`nonessential = 0` ⇒ **无** `edges` / `width` / `height` 可读（不得臆造），`hull=3` 同样不落 canonical；`uvs=[0,0,1,0,0.5,1]`、`triangles=[0,1,2]`、`vertices=[0,0,32,0,16,32]` |
+| **17-shared-atlas** | 两个骨架**都**解析成功；`pair_hub_left` ⇒ `bones=2 slots=1 attachments=1`、region `hub_left`；`pair_hub_right` ⇒ 同计数、region `hub_right`；两者**都**解析到**同一份** `pair_hub.atlas.txt`（同一 `Atlas.id`，**不是**各建一份副本，D53）；工程内 `atlases=1` / `textures=1`；`draft.resources` 对同一 PNG **不重复**登记；重开后仍为 1 份（D40 / D53） |
+| **18-ambiguous-atlas** | **拒绝**，诊断＝**歧义**（`ATLAS_CANDIDATE_AMBIGUOUS` 或阶段 B 定名的等价码），**必须**含候选数（2）与候选名单的可定位信息；候选整体丢弃、工程不变。**不得**：取 `duo_alpha` 或 `duo_beta` 中任一个、不得静默成功 |
+| **19-multi-atlas-same-name** | 解析成功；走**同名优先** ⇒ 图集为 `pick_unit.atlas.txt`，region `pick_region` 命中；**不得**判歧义、**不得**取 `decoy.atlas.txt`（decoy 里没有 `pick_region`，误取会表现为 region 未命中，可定位）。这是语料 11 个"多图集目录内靠同名消解"单位的**回归守卫** |
 
 **关于 03 / 05 / 09 / 10 / 12 / 13 的重要说明**：旧项目的宽松 Reader 能把这六个文件**读完**
 （03 只对越界父索引记一条 warn；05 不校验浮点有限性；09 / 10 不校验三角索引与骨骼下标；
 12 / 13 不校验权重和）—— 这正是 fixture 要钉住的语义差别：**产品读取器必须拒绝**，
 不能沿用"能读完就算成功"的宽松口径。
 
-生成器 `--verify` 的当前实测输出（**16 个** fixture）：
+生成器 `--verify` 的当前实测输出（**19 个** fixture；17 有两个骨架故两行）：
 
 ```
 01-minimal:                     ok  bones=1 slots=1 skins=1 anims=0 version=3.2.01 warnings=0
@@ -108,6 +114,10 @@ node tools/skeleton-probe/make-fixture.mjs --verify
                                    warn: skins.slot-body.body_wmesh_linked_noffd — 同上
 15-ik-mix-zero:                 ok  bones=2 slots=1 skins=1 anims=0 version=3.2.01 warnings=0
 16-minimal-mesh-plain:          ok  bones=1 slots=1 skins=1 anims=0 version=3.2.01 warnings=0
+17-shared-atlas [pair_hub_left]:  ok  bones=2 slots=1 skins=1 anims=0 version=3.2.01 warnings=0
+17-shared-atlas [pair_hub_right]: ok  bones=2 slots=1 skins=1 anims=0 version=3.2.01 warnings=0
+18-ambiguous-atlas:             ok  bones=2 slots=1 skins=1 anims=0 version=3.2.01 warnings=0
+19-multi-atlas-same-name:       ok  bones=2 slots=1 skins=1 anims=0 version=3.2.01 warnings=0
 ```
 
 > 08 / 14 的 warn 文本在控制台里会因**旧参照 Reader 源码的编码问题**显示成乱码
@@ -132,7 +142,7 @@ node tools/skeleton-probe/make-fixture.mjs --verify
 ## 3. 不含什么
 
 - 不含任何游戏资产、不含源二进制片段、不含真实图集/纹理
-- PNG 为脚本生成的**纯色图**（01 红、02 蓝、06 黄、07 绿、08 紫、14 橙、16 青），仅用于验证纹理链接与 IHDR 尺寸解析
+- PNG 为脚本生成的**纯色图**（01 红、02 蓝、06 黄、07 绿、08 紫、14 橙、16 青、17 蓝紫、18 红/绿各一、19 黄/紫各一），仅用于验证纹理链接与 IHDR 尺寸解析
 - 不含绝对路径、盘符、用户名
 - **合成 fixture 不等于兼容声明**（D13）：结构层覆盖 ≠ 语义已验证，见 §4 末的提醒
 
@@ -143,6 +153,7 @@ fixture 只覆盖**结构层**与**拒绝语义**。以下能力语料里**没�
 
 | 能力 | 语料情况 | fixture 覆盖程度 |
 |---|---|---|
+| **共享图集布局**（多骨架共用一份图集） | **1 处 / 2 个单位**（`h0164s5/watch/`）—— 唯一有真实样本的 Task 6 形态 | **已覆盖**：17（正向，逐形态对齐）、18（歧义拒绝，语料 0 例）、19（同名优先守卫，对应语料 5 目录 / 11 单位） |
 | 多皮肤 | 0 个多皮肤单位（1113/1113 单皮肤） | 未覆盖（需后续补 fixture） |
 | 多页图集 | 0 例多页 | 未覆盖（需后续补 fixture） |
 | path 约束 / boundingbox / clipping | 0 例 | 未覆盖 |

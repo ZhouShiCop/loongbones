@@ -28,6 +28,13 @@
  *   16-minimal-mesh-plain    `nonessential = 0` 的 mesh（**语料 1109 / 1113 的形态**）：
  *                            无 edges / width / height、骨骼末尾无颜色；06 的补集
  *
+ * Task 6 A4（共享图集布局，**按目录组织**，与前 16 个"扁平文件"不同）：
+ *   17-shared-atlas        正向：两个骨架共用一份 `<上级目录名>_<目录名>.atlas.txt` + 单页 PNG
+ *                          （== 语料唯一一处 `h0164s5/watch/` 的形态，2 个单位）
+ *   18-ambiguous-atlas     负向：目录内 2 个候选图集且**都不同名** ⇒ 歧义，**必须显式拒绝**（Q6-2）
+ *   19-multi-atlas-same-name 守卫：目录内 2 个图集但**骨架同名的一个存在** ⇒
+ *                          必须走"同名优先"，**不得**判歧义、**不得**选到另一个（回归守卫）
+ *
  * 布局依据（只读参照，不是产品代码）：converter/src/read/binary32.ts 与 binary.ts。
  * 本生成器按该布局**独立写出**字节，不调用旧项目写入器，也不用任何游戏文件做模板。
  *
@@ -679,6 +686,88 @@ function fixtureMinimalMeshPlain() {
 }
 
 // ---------------------------------------------------------------------------
+// Task 6 A4：共享图集布局（17 / 18 / 19 —— **目录即单位**，与 01–16 的扁平文件不同）
+// ---------------------------------------------------------------------------
+//
+// 目录形态逐字对齐语料**唯一一处** `h0164s5/watch/`（A1 取证
+// `docs/skeleton/shared-atlas-layout-evidence.md`）：
+//
+//   <parent>/<dir>/<parent>_<dir>.atlas.txt          ← 图集名 = 上级目录名 + '_' + 目录名
+//   <parent>/<dir>/<parent>_<dir>_<role>.skel.bytes  ← 骨架名带角色后缀 ⇒ 与图集**不同名**
+//   <parent>/<dir>/<parent>_<dir>.png                ← 单页，两个骨架共用
+//
+// 注意：**不能**用"与目录同名"来命名图集 —— 语料里严格 `<dir>.atlas.txt` 是 **0 例**（A1 §2）。
+
+function sharedAtlasSkeleton(role, bone, region, color) {
+  return buildSkeleton({
+    hash: 'loongbones-fixture-' + role, width: 64, height: 64, nonessential: false,
+    bones: [{ name: 'root', length: 0 }, { name: bone, parentIndex: 0, x: 8, length: 20 }],
+    slots: [{ name: 'slot-' + role, boneIndex: 1, attachment: region }],
+    skinEntries: [{ slotIndex: 0, attachments: [{ name: region, path: null, width: 32, height: 32 }] }],
+  });
+}
+
+function fixtureSharedAtlas() {
+  // 17 正向：2 个骨架共用 1 份图集 + 1 张单页 PNG（语料 2 个单位同形态）。
+  // 图集里两个 region 各给一个骨架 ⇒ 若实现把两个骨架都指到"第一个 region"，
+  // 另一个骨架的 region 名就会未命中（可被断言抓住），因此不能靠"随便取一个"通过。
+  const dir = '17-shared-atlas/pair/hub';
+  return {
+    name: '17-shared-atlas',
+    files: {
+      [dir + '/pair_hub_left.skel.bytes']: sharedAtlasSkeleton('pair-hub-left', 'arm', 'hub_left'),
+      [dir + '/pair_hub_right.skel.bytes']: sharedAtlasSkeleton('pair-hub-right', 'leg', 'hub_right'),
+      [dir + '/pair_hub.atlas.txt']: Buffer.from(atlasText('pair_hub.png', 64, 64,
+        [{ name: 'hub_left', x: 0, y: 0, w: 32, h: 32 },
+         { name: 'hub_right', x: 32, y: 0, w: 32, h: 32 }]), 'utf8'),
+      [dir + '/pair_hub.png']: pngBytes(64, 64, [40, 160, 220, 255]),
+    },
+  };
+}
+
+function fixtureAmbiguousAtlas() {
+  // 18 负向（Q6-2 裁定「歧义拒绝」）：目录内 2 个候选图集，且**都不与骨架同名**。
+  // 两个图集都含 `duo_region` ⇒ 无论选哪个"都能解析成功"，所以只有**显式拒绝**才算对；
+  // 若实现"取第一个"就查不出来 —— 这正是本 fixture 要钉住的语义。
+  const dir = '18-ambiguous-atlas/amb/duo';
+  return {
+    name: '18-ambiguous-atlas',
+    files: {
+      [dir + '/duo_unit.skel.bytes']: sharedAtlasSkeleton('duo-unit', 'arm', 'duo_region'),
+      [dir + '/duo_alpha.atlas.txt']: Buffer.from(atlasText('duo_alpha.png', 32, 32,
+        [{ name: 'duo_region', x: 0, y: 0, w: 16, h: 16 }]), 'utf8'),
+      [dir + '/duo_beta.atlas.txt']: Buffer.from(atlasText('duo_beta.png', 32, 32,
+        [{ name: 'duo_region', x: 0, y: 0, w: 16, h: 16 }]), 'utf8'),
+      [dir + '/duo_alpha.png']: pngBytes(32, 32, [220, 80, 80, 255]),
+      [dir + '/duo_beta.png']: pngBytes(32, 32, [80, 220, 80, 255]),
+    },
+  };
+}
+
+function fixtureMultiAtlasSameName() {
+  // 19 守卫（阶段 B 回归的**具名样本**）：目录内有 2 个图集，但**骨架同名的一个存在**。
+  // 语料实证：5 个目录含 ≥2 张图集、11 个骨架全靠「同名优先」才解析正确（A1 复核 §4）。
+  // 判据：
+  //   ✅ 取 `pick_unit.atlas.txt`（同名优先），region `pick_region` 命中；
+  //   ❌ 判成歧义并拒绝 —— 错（语料里 11 个单位会全部导入失败）；
+  //   ❌ 取到 `decoy.atlas.txt` —— 错；且因 decoy 里**没有** `pick_region`，
+  //      会表现为 region 未命中（可定位，不是静默错值）。
+  const dir = '19-multi-atlas-same-name/multi/pick';
+  return {
+    name: '19-multi-atlas-same-name',
+    files: {
+      [dir + '/pick_unit.skel.bytes']: sharedAtlasSkeleton('pick-unit', 'arm', 'pick_region'),
+      [dir + '/pick_unit.atlas.txt']: Buffer.from(atlasText('pick_unit.png', 32, 32,
+        [{ name: 'pick_region', x: 0, y: 0, w: 16, h: 16 }]), 'utf8'),
+      [dir + '/pick_unit.png']: pngBytes(32, 32, [240, 200, 60, 255]),
+      [dir + '/decoy.atlas.txt']: Buffer.from(atlasText('decoy.png', 32, 32,
+        [{ name: 'decoy_region', x: 0, y: 0, w: 16, h: 16 }]), 'utf8'),
+      [dir + '/decoy.png']: pngBytes(32, 32, [120, 120, 240, 255]),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // 写出 + 可选回读自校验
 // ---------------------------------------------------------------------------
 
@@ -689,11 +778,14 @@ const all = [fixtureMinimal(), fixtureNested(), fixtureBadParentIndex(), fixture
              fixtureMeshBadTriangle(), fixtureMeshBadBoneIndex(), fixtureConstraints(),
              fixtureMeshBadWeightSumZero(), fixtureMeshBadWeightSumNegative(),
              fixtureLinkedMeshImplicitSkin(), fixtureIkMixZero(),
-             fixtureMinimalMeshPlain()];
+             fixtureMinimalMeshPlain(),
+             fixtureSharedAtlas(), fixtureAmbiguousAtlas(), fixtureMultiAtlasSameName()];
 const index = [];
 for (const fx of all) {
   for (const [rel, buf] of Object.entries(fx.files)) {
-    fs.writeFileSync(path.join(OUT_DIR, rel), buf);
+    const out = path.join(OUT_DIR, rel);
+    fs.mkdirSync(path.dirname(out), { recursive: true });   // 17–19 是**目录**布局，需要建子目录
+    fs.writeFileSync(out, buf);
   }
   index.push({ fixture: fx.name, files: Object.keys(fx.files) });
   console.log(`${fx.name}: ${Object.keys(fx.files).join(', ')}`);
@@ -706,18 +798,22 @@ if (VERIFY) {
   const { IssueLog } = await import(toUrl(path.join(OLD_ROOT, 'converter/src/model.ts')));
   console.log('\n回读自校验（strictEof: true）：');
   for (const fx of all) {
-    const rel = Object.keys(fx.files).find((k) => k.endsWith('.skel.bytes'));
-    const buf = fs.readFileSync(path.join(OUT_DIR, rel));
-    const log = new IssueLog();
-    try {
-      const ir = readSkeletonBinary32(buf, log, { strictEof: true });
-      const warns = (log.issues ?? []).filter((x) => x.level === 'warn');
-      console.log(`  ${fx.name}: ok  bones=${ir.bones.length} slots=${ir.slots.length} skins=${ir.skins.length}` +
-        ` anims=${(ir.animations ?? []).length} version=${ir.skeleton?.version}` +
-        ` warnings=${warns.length}`);
-      for (const wn of warns) console.log(`     warn: ${wn.where} — ${wn.message}`);
-    } catch (err) {
-      console.log(`  ${fx.name}: FAIL — ${String(err.message ?? err)}`);
+    const rels = Object.keys(fx.files).filter((k) => k.endsWith('.skel.bytes'));
+    for (const rel of rels) {
+      // 17 起一个 fixture 可以有**多个**骨架（共享图集 = 多单位指向同一图集）⇒ 逐个回读
+      const label = rels.length > 1 ? `${fx.name} [${path.basename(rel)}]` : fx.name;
+      const buf = fs.readFileSync(path.join(OUT_DIR, rel));
+      const log = new IssueLog();
+      try {
+        const ir = readSkeletonBinary32(buf, log, { strictEof: true });
+        const warns = (log.issues ?? []).filter((x) => x.level === 'warn');
+        console.log(`  ${label}: ok  bones=${ir.bones.length} slots=${ir.slots.length} skins=${ir.skins.length}` +
+          ` anims=${(ir.animations ?? []).length} version=${ir.skeleton?.version}` +
+          ` warnings=${warns.length}`);
+        for (const wn of warns) console.log(`     warn: ${wn.where} — ${wn.message}`);
+      } catch (err) {
+        console.log(`  ${label}: FAIL — ${String(err.message ?? err)}`);
+      }
     }
   }
 }

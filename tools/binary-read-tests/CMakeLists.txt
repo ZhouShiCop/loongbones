@@ -10,6 +10,10 @@ add_executable(loongbones_binary_read_tests
   ${CMAKE_SOURCE_DIR}/tests/importers/spine32/test_binary_reader.cpp
 )
 target_include_directories(loongbones_binary_read_tests PRIVATE ${CMAKE_SOURCE_DIR})
+# Task 5 B3：合成 fixture 目录在构建时注入 —— 产品测试**直接加载**
+# docs/skeleton/fixtures 下的字节，不依赖当前工作目录。
+target_compile_definitions(loongbones_binary_read_tests PRIVATE
+  LOONGBONES_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/docs/skeleton/fixtures")
 target_link_libraries(loongbones_binary_read_tests PRIVATE loongbones_spine32_atlas)
 target_compile_features(loongbones_binary_read_tests PRIVATE cxx_std_17)
 add_test(NAME binary_read_tests COMMAND loongbones_binary_read_tests)

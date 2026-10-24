@@ -96,9 +96,11 @@ Skeleton makeSkeleton(const AtlasId& atlas, const AtlasRegionId& region) {
   e.id = newSkinEntryId();
   e.slotId = slot;
   e.attachmentName = "head";
-  e.attachment.regionId = region;
-  e.attachment.width = 32;
-  e.attachment.height = 32;
+  RegionAttachment att;
+  att.regionId = region;
+  att.width = 32;
+  att.height = 32;
+  e.attachment = att;
   sk.entries = {e};
   s.skins = {sk};
   return s;
@@ -118,10 +120,17 @@ ProjectData validProjectWithSkeleton() {
 
 bool sameColor(const ColorF& a, const ColorF& b) { return a == b; }
 
-bool sameAttachment(const RegionAttachment& a, const RegionAttachment& b) {
-  return a.regionId == b.regionId && a.x == b.x && a.y == b.y && a.rotationDeg == b.rotationDeg &&
-         a.scaleX == b.scaleX && a.scaleY == b.scaleY && a.width == b.width &&
-         a.height == b.height && sameColor(a.color, b.color);
+bool sameAttachment(const Attachment& a, const Attachment& b) {
+  if (a.index() != b.index()) return false;
+  if (const auto* ra = std::get_if<RegionAttachment>(&a)) {
+    const auto& rb = std::get<RegionAttachment>(b);
+    return ra->regionId == rb.regionId && ra->x == rb.x && ra->y == rb.y &&
+           ra->rotationDeg == rb.rotationDeg && ra->scaleX == rb.scaleX &&
+           ra->scaleY == rb.scaleY && ra->width == rb.width && ra->height == rb.height &&
+           sameColor(ra->color, rb.color);
+  }
+  // 第二批附件：字段逐个比较（mesh / 加权 / linked 各自有 operator==）。
+  return a == b;
 }
 
 bool sameSkinEntry(const SkinEntry& a, const SkinEntry& b) {
@@ -251,7 +260,8 @@ TEST(Skeleton, ValidateSkeletonReportsAllProblems) {
   Skeleton& s = d.skeletons[0];
   s.bones[1].x = kNaN;                                        // 数值非法
   s.slots[0].boneId = newBoneId();                            // 插槽悬空
-  s.skins[0].entries[0].attachment.regionId = newAtlasRegionId();  // 区域悬空
+  std::get<RegionAttachment>(s.skins[0].entries[0].attachment).regionId =
+      newAtlasRegionId();  // 区域悬空
   s.atlasIds[0] = newAtlasId();                               // 图集悬空
   const std::vector<Diagnostic> ds = validateSkeleton(s, d);
   CHECK(containsCode(ds, DiagnosticCode::kSkeletonValueNotFinite));
@@ -581,7 +591,8 @@ TEST(Skeleton, SkinOnlyNestedInSkeleton) {
 
 TEST(Skeleton, AttachmentRegionNotFoundRejected) {
   ProjectData d = validProjectWithSkeleton();
-  d.skeletons[0].skins[0].entries[0].attachment.regionId = newAtlasRegionId();
+  std::get<RegionAttachment>(d.skeletons[0].skins[0].entries[0].attachment).regionId =
+      newAtlasRegionId();
   expectAdoptRejectedKeepSkeleton(d, DiagnosticCode::kRegionNotFound);
 }
 
@@ -620,9 +631,264 @@ TEST(Skeleton, InfiniteBoneScaleRejected) {
   expectAdoptRejectedKeepSkeleton(d, DiagnosticCode::kSkeletonValueNotFinite);
 }
 
+// =====================================================================
+// Task 5 B1：第二批附件（mesh / 加权 / linked）与约束（IK / transform）
+// 契约：docs/skeleton/mesh-and-constraint-rfc.md；裁定 D34 / D35 / D37 / D38
+// =====================================================================
+
+namespace {
+
+AtlasRegionId regionOf(const Skeleton& s) {
+  return std::get<RegionAttachment>(s.skins[0].entries[0].attachment).regionId;
+}
+
+bool hasCode(const std::vector<Diagnostic>& diags, DiagnosticCode code) {
+  for (const Diagnostic& diag : diags) {
+    if (diag.code == code) return true;
+  }
+  return false;
+}
+
+/// 3 顶点 / 1 三角 / uv 全在 0..1 的最小非加权 mesh。
+MeshAttachment baseMesh(const Skeleton& s) {
+  MeshAttachment m;
+  m.regionId = regionOf(s);
+  m.uvs = {0.0, 0.0, 1.0, 0.0, 0.5, 1.0};
+  m.triangles = {0, 1, 2};
+  m.vertices = {0.0, 0.0, 32.0, 0.0, 16.0, 32.0};
+  m.width = 32.0;
+  m.height = 32.0;
+  return m;
+}
+
+/// 3 顶点 × 1 绑定，权重和均为 1（合法基线）。
+WeightedMeshAttachment baseWeighted(const Skeleton& s) {
+  WeightedMeshAttachment m;
+  m.regionId = regionOf(s);
+  m.uvs = {0.0, 0.0, 1.0, 0.0, 0.5, 1.0};
+  m.triangles = {0, 1, 2};
+  m.vertexBindings = {
+      {VertexBinding{s.bones[1].id, 0.0, 0.0, 1.0}},
+      {VertexBinding{s.bones[1].id, 32.0, 0.0, 1.0}},
+      {VertexBinding{s.bones[0].id, 16.0, 32.0, 1.0}},
+  };
+  return m;
+}
+
+IkConstraint validIk(const Skeleton& s) {
+  IkConstraint c;
+  c.id = newIkConstraintId();
+  c.name = "leg-ik";
+  c.boneIds = {s.bones[1].id};
+  c.targetBoneId = s.bones[0].id;
+  c.mix = 1.0;
+  c.enabled = true;  // mix != 0 ⇒ 开启（D35）
+  c.bendPositive = true;
+  return c;
+}
+
+}  // namespace
+
+TEST(Skeleton, MeshAttachmentAccepted) {
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  MeshAttachment m = baseMesh(s);
+  s.skins[0].entries[0].attachment = m;
+  CHECK(validateSkeleton(s, d).empty());
+}
+
+TEST(Skeleton, MeshTriangleIndexOutOfRangeRejected) {
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  MeshAttachment m = baseMesh(s);
+  m.triangles = {0, 1, 9};  // 9 ≥ 顶点数 3
+  s.skins[0].entries[0].attachment = m;
+  expectAdoptRejectedKeepSkeleton(d, DiagnosticCode::kMeshTriangleIndexOutOfRange);
+}
+
+TEST(Skeleton, MeshUvCountMismatchRejected) {
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  MeshAttachment m = baseMesh(s);
+  m.uvs = {0.0, 0.0, 1.0, 0.0};  // 4 ≠ 2×3
+  s.skins[0].entries[0].attachment = m;
+  expectAdoptRejectedKeepSkeleton(d, DiagnosticCode::kMeshVertexGeometryInvalid);
+}
+
+TEST(Skeleton, MeshUvOutOfRangeRejected) {
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  MeshAttachment m = baseMesh(s);
+  m.uvs[5] = 1.5;  // 越出 [0,1]
+  s.skins[0].entries[0].attachment = m;
+  expectAdoptRejectedKeepSkeleton(d, DiagnosticCode::kMeshUvOutOfRange);
+}
+
+TEST(Skeleton, WeightedMeshAccepted) {
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  WeightedMeshAttachment m = baseWeighted(s);
+  s.skins[0].entries[0].attachment = m;
+  CHECK(validateSkeleton(s, d).empty());
+}
+
+TEST(Skeleton, WeightedMeshNegativeWeightAcceptedWhenSumPositive) {
+  // D34：单条负权重合法（语义＝该绑定对顶点无影响）；D37：判据是**权重和**。
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  WeightedMeshAttachment m = baseWeighted(s);
+  m.vertexBindings[0] = {VertexBinding{s.bones[1].id, 0.0, 0.0, 1.2},
+                          VertexBinding{s.bones[0].id, 10.0, 0.0, -0.2}};
+  s.skins[0].entries[0].attachment = m;
+  CHECK(validateSkeleton(s, d).empty());
+}
+
+TEST(Skeleton, WeightedMeshZeroWeightSumRejected) {
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  WeightedMeshAttachment m = baseWeighted(s);
+  m.vertexBindings[1] = {VertexBinding{s.bones[1].id, 32.0, 0.0, 0.0}};
+  s.skins[0].entries[0].attachment = m;
+  expectAdoptRejectedKeepSkeleton(d, DiagnosticCode::kMeshWeightSumInvalid);
+}
+
+TEST(Skeleton, WeightedMeshNegativeWeightSumRejected) {
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  WeightedMeshAttachment m = baseWeighted(s);
+  m.vertexBindings[1] = {VertexBinding{s.bones[1].id, 32.0, 0.0, -0.5},
+                          VertexBinding{s.bones[0].id, 0.0, 32.0, -0.5}};
+  s.skins[0].entries[0].attachment = m;
+  expectAdoptRejectedKeepSkeleton(d, DiagnosticCode::kMeshWeightSumInvalid);
+}
+
+TEST(Skeleton, WeightedMeshEmptyBindingRejected) {
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  WeightedMeshAttachment m = baseWeighted(s);
+  m.vertexBindings[2] = {};
+  s.skins[0].entries[0].attachment = m;
+  expectAdoptRejectedKeepSkeleton(d, DiagnosticCode::kMeshBindingCountInvalid);
+}
+
+TEST(Skeleton, WeightedMeshUnknownBoneRejected) {
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  WeightedMeshAttachment m = baseWeighted(s);
+  m.vertexBindings[0] = {VertexBinding{newBoneId(), 0.0, 0.0, 1.0}};
+  s.skins[0].entries[0].attachment = m;
+  expectAdoptRejectedKeepSkeleton(d, DiagnosticCode::kMeshWeightBoneUnresolved);
+}
+
+TEST(Skeleton, LinkedMeshParentResolvedEvenWhenChildComesFirst) {
+  // D38：父引用必须**两阶段**解析 —— 子条目排在父之前也必须解析成功。
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  SkinEntry parent = s.skins[0].entries[0];
+  parent.attachmentName = "body";
+
+  SkinEntry child;
+  child.id = newSkinEntryId();
+  child.slotId = s.slots[0].id;
+  child.attachmentName = "body_linked";
+  LinkedMeshAttachment lm;
+  lm.regionId = regionOf(s);
+  lm.parentSlotId = s.slots[0].id;
+  lm.parentAttachmentName = "body";
+  lm.inheritDeform = true;
+  child.attachment = lm;
+
+  s.skins[0].entries = {child, parent};  // **子在前**
+  CHECK(validateSkeleton(s, d).empty());
+}
+
+TEST(Skeleton, LinkedMeshParentUnresolvedRejected) {
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  LinkedMeshAttachment lm;
+  lm.regionId = regionOf(s);
+  lm.parentSlotId = s.slots[0].id;
+  lm.parentAttachmentName = "no_such_attachment";
+  s.skins[0].entries[0].attachment = lm;
+  expectAdoptRejectedKeepSkeleton(d, DiagnosticCode::kMeshLinkedParentUnresolved);
+}
+
+TEST(Skeleton, IkConstraintAccepted) {
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  s.ikConstraints = {validIk(s)};
+  CHECK(validateSkeleton(s, d).empty());
+}
+
+TEST(Skeleton, IkConstraintEmptyChainRejected) {
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  IkConstraint c = validIk(s);
+  c.boneIds.clear();
+  s.ikConstraints = {c};
+  expectAdoptRejectedKeepSkeleton(d, DiagnosticCode::kConstraintChainEmpty);
+}
+
+TEST(Skeleton, IkConstraintUnresolvedTargetRejected) {
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  IkConstraint c = validIk(s);
+  c.targetBoneId = newBoneId();
+  s.ikConstraints = {c};
+  expectAdoptRejectedKeepSkeleton(d, DiagnosticCode::kConstraintTargetUnresolved);
+}
+
+TEST(Skeleton, IkConstraintWrongIdKindRejected) {
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  IkConstraint c = validIk(s);
+  c.id = newBoneId();  // 种类必须是 IkConstraint
+  s.ikConstraints = {c};
+  expectAdoptRejectedKeepSkeleton(d, DiagnosticCode::kIdKindMismatch);
+}
+
+TEST(Skeleton, TransformConstraintAcceptedWithOutOfRangeMix) {
+  // D36：mix / offset **原值承载、不解释语义** —— 越出 [0,1] 也不得判非法。
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  TransformConstraint c;
+  c.id = newTransformConstraintId();
+  c.name = "copy";
+  c.boneId = s.bones[1].id;
+  c.targetBoneId = s.bones[0].id;
+  c.rotateMix = -180.0;
+  c.translateMix = 305.1;
+  c.scaleMix = -316.4;
+  s.transformConstraints = {c};
+  CHECK(validateSkeleton(s, d).empty());
+}
+
+TEST(Skeleton, TransformConstraintUnresolvedBoneRejected) {
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  TransformConstraint c;
+  c.id = newTransformConstraintId();
+  c.boneId = newBoneId();
+  c.targetBoneId = s.bones[0].id;
+  s.transformConstraints = {c};
+  expectAdoptRejectedKeepSkeleton(d, DiagnosticCode::kConstraintTargetUnresolved);
+}
+
+TEST(Skeleton, NonFiniteWeightRejected) {
+  ProjectData d = validProjectWithSkeleton();
+  Skeleton& s = d.skeletons[0];
+  WeightedMeshAttachment m = baseWeighted(s);
+  m.vertexBindings[0] = {VertexBinding{s.bones[1].id, 0.0, 0.0, kNaN}};
+  s.skins[0].entries[0].attachment = m;
+  const std::vector<Diagnostic> diags = validateSkeleton(s, d);
+  CHECK(hasCode(diags, DiagnosticCode::kSkeletonValueNotFinite));
+  // 权重非有限时权重和**无法判定** ⇒ 不再叠加 MESH_WEIGHT_SUM_INVALID（避免重复报同一处）。
+  CHECK(!hasCode(diags, DiagnosticCode::kMeshWeightSumInvalid));
+}
+
 TEST(Skeleton, NonFiniteAttachmentValueRejected) {
   ProjectData d = validProjectWithSkeleton();
-  d.skeletons[0].skins[0].entries[0].attachment.width = kNaN;
+  std::get<RegionAttachment>(d.skeletons[0].skins[0].entries[0].attachment).width = kNaN;
   expectAdoptRejectedKeepSkeleton(d, DiagnosticCode::kSkeletonValueNotFinite);
 }
 
